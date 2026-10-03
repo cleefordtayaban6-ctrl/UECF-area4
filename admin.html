@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Admin – Members</title>
+<style>
+:root{--bg:#f6f7f4;--card:#fff;--ink:#1d2a24;--mute:#5f6d66;--line:#d5dbd6;--accent:#1f5f4a;--err:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#141a17;--card:#1c2420;--ink:#e8eee9;--mute:#9aa8a0;--line:#33403a;--accent:#5fbf9a;--err:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 Georgia,serif}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:1.5rem;margin:.3em 0 .6em}
+input,select,button{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+button{background:var(--accent);color:#fff;border:0;font-weight:bold;cursor:pointer}
+@media (prefers-color-scheme:dark){button{color:#0b1410}}
+button.plain{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:normal}
+#login{max-width:340px;display:grid;gap:10px}
+#bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+#bar .sp{flex:1}
+.wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:760px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{background:var(--bg)}
+td img{width:48px;height:48px;object-fit:cover;border-radius:6px;display:block}
+.err{color:var(--err);font-weight:bold}
+#count{color:var(--mute)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Members – Admin</h1>
+
+<form id="login">
+  <input id="email" type="email" placeholder="Admin email" required autocomplete="username">
+  <input id="pass" type="password" placeholder="Password" required autocomplete="current-password">
+  <button type="submit">Log in</button>
+  <div id="lerr" class="err"></div>
+</form>
+
+<section id="panel" hidden>
+  <div id="bar">
+    <select id="fc"><option value="">All centers</option></select>
+    <input id="q" type="search" placeholder="Search name…">
+    <span id="count"></span>
+    <span class="sp"></span>
+    <button id="csv" type="button">Download CSV</button>
+    <button id="out" type="button" class="plain">Log out</button>
+  </div>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>Photo</th><th>Name</th><th>Center</th><th>Status</th><th>Age</th><th>Position</th><th>Spiritual gift</th><th>Registered</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ====== SAME VALUES AS index.html ======
+const SUPABASE_URL = "https://musedgbzkyrhmlpqhrzk.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "sb_publishable_FaQ2rWRMdmFbTjJ_QR0xwQ_K5z0JuHR";
+// =======================================
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Baro Jerusalem","Pergamo","Patmos","Raniag ti lawag","Galilea","Tesalonica","Galacia","Baro a langit"];
+CENTERS.forEach(c => $("fc").add(new Option(c, c)));
+let all = [], urls = {};
+
+function esc(s){ const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+
+async function load(){
+  const r = await db.from("members").select("*").order("created_at", {ascending:false});
+  if (r.error) { $("count").textContent = "Error: " + r.error.message; return; }
+  all = r.data;
+  const paths = all.map(m => m.photo_path).filter(Boolean);
+  urls = {};
+  if (paths.length) {
+    const s = await db.storage.from("member-photos").createSignedUrls(paths, 3600);
+    (s.data || []).forEach(x => { if (x.signedUrl) urls[x.path] = x.signedUrl; });
+  }
+  render();
+}
+
+function filtered(){
+  const c = $("fc").value, q = $("q").value.trim().toLowerCase();
+  return all.filter(m => (!c || m.center === c) && (!q || m.full_name.toLowerCase().includes(q)));
+}
+
+function render(){
+  const list = filtered();
+  $("count").textContent = list.length + " member" + (list.length === 1 ? "" : "s");
+  $("rows").innerHTML = list.map(m => `<tr>
+    <td>${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : ""}</td>
+    <td>${esc(m.full_name)}</td><td>${esc(m.center)}</td><td>${esc(m.status)}</td><td>${m.age ?? ""}</td>
+    <td>${esc(m.position)}</td><td>${esc(m.spiritual_gift)}</td>
+    <td>${new Date(m.created_at).toLocaleDateString()}</td></tr>`).join("");
+}
+
+function csvCell(v){
+  v = v == null ? "" : String(v);
+  if (/^[=+\-@]/.test(v)) v = "'" + v;           // blocks spreadsheet formula injection
+  return '"' + v.replace(/"/g, '""') + '"';
+}
+
+$("csv").onclick = () => {
+  const head = ["Full name","Center","Status","Age","Position","Spiritual gift","Photo link (expires in 1 hour)","Registered"];
+  const lines = [head.map(csvCell).join(",")].concat(filtered().map(m => [
+    m.full_name, m.center, m.status, m.age, m.position, m.spiritual_gift,
+    urls[m.photo_path] || "", new Date(m.created_at).toLocaleString()
+  ].map(csvCell).join(",")));
+  const blob = new Blob(["\ufeff" + lines.join("\r\n")], {type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "members-" + new Date().toISOString().slice(0,10) + ".csv";
+  a.click();
+};
+
+function show(signedIn){ $("login").hidden = signedIn; $("panel").hidden = !signedIn; if (signedIn) load(); }
+
+$("login").addEventListener("submit", async e => {
+  e.preventDefault(); $("lerr").textContent = "";
+  const r = await db.auth.signInWithPassword({email:$("email").value, password:$("pass").value});
+  if (r.error) $("lerr").textContent = "Login failed: " + r.error.message; else show(true);
+});
+$("out").onclick = async () => { await db.auth.signOut(); show(false); };
+$("fc").onchange = $("q").oninput = render;
+db.auth.getSession().then(r => show(!!r.data.session));
+</script>
+</body>
+</html>

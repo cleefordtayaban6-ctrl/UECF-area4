@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Member Registration</title>
+<style>
+:root{--bg:#f6f7f4;--card:#fff;--ink:#1d2a24;--mute:#5f6d66;--line:#d5dbd6;--accent:#1f5f4a;--err:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#141a17;--card:#1c2420;--ink:#e8eee9;--mute:#9aa8a0;--line:#33403a;--accent:#5fbf9a;--err:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Georgia,"Times New Roman",serif}
+main{max-width:520px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.7rem;margin:.5em 0 .2em}
+p.sub{margin:0 0 1.2em;color:var(--mute)}
+form{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px}
+label{display:block;font-weight:bold;margin:14px 0 4px}
+input,select{width:100%;padding:10px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px}
+input:focus,select:focus,button:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+small{color:var(--mute)}
+button{margin-top:20px;width:100%;padding:12px;font:bold 1rem Georgia,serif;color:#fff;background:var(--accent);border:0;border-radius:6px;cursor:pointer}
+@media (prefers-color-scheme:dark){button{color:#0b1410}}
+button:disabled{opacity:.6;cursor:wait}
+#msg{margin-top:14px;font-weight:bold}
+#msg.err{color:var(--err)} #msg.ok{color:var(--accent)}
+img#preview{display:none;max-width:140px;margin-top:8px;border-radius:6px;border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Member Registration</h1>
+  <p class="sub">Fill in your details and tap Submit.</p>
+
+  <form id="f">
+    <label for="full_name">Full name</label>
+    <input id="full_name" required maxlength="120" autocomplete="name">
+
+    <label for="center">Center</label>
+    <select id="center" required>
+      <option value="">Select your center…</option>
+      <option>Puon ti Biag</option>
+      <option>Damasco</option>
+      <option>Ti libro a naselloan</option>
+      <option>Eufrates</option>
+      <option>Baro Jerusalem</option>
+      <option>Pergamo</option>
+      <option>Patmos</option>
+      <option>Raniag ti lawag</option>
+      <option>Galilea</option>
+      <option>Tesalonica</option>
+      <option>Galacia</option>
+      <option>Baro a langit</option>
+    </select>
+
+    <label for="status">Status</label>
+    <select id="status" required>
+      <option value="">Select…</option>
+      <option>Student</option>
+      <option>Working</option>
+      <option>Not working</option>
+      <option>Other</option>
+    </select>
+
+    <label for="age">Age</label>
+    <input id="age" type="number" min="1" max="120" required inputmode="numeric">
+
+    <label for="position">Position</label>
+    <input id="position" maxlength="80">
+
+    <label for="gift">Spiritual gift</label>
+    <input id="gift" maxlength="80">
+
+    <label for="photo">Photo</label>
+    <input id="photo" type="file" accept="image/*">
+    <small>Maximum 2 MB (JPG, PNG or WebP).</small><br>
+    <img id="preview" alt="Photo preview">
+
+    <button id="btn" type="submit">Submit</button>
+    <div id="msg" role="status" aria-live="polite"></div>
+  </form>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ====== PASTE YOUR VALUES (Supabase > Project Settings > API) ======
+const SUPABASE_URL = "https://musedgbzkyrhmlpqhrzk.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "sb_publishable_FaQ2rWRMdmFbTjJ_QR0xwQ_K5z0JuHR";   // the "anon / public" key ONLY
+// ===================================================================
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+const MAX = 2 * 1024 * 1024;
+const TYPES = {"image/jpeg":"jpg","image/png":"png","image/webp":"webp"};
+
+function say(text, cls){ $("msg").textContent = text; $("msg").className = cls || ""; }
+
+$("photo").addEventListener("change", () => {
+  const f = $("photo").files[0], p = $("preview");
+  if (!f) { p.style.display = "none"; return; }
+  if (f.size > MAX) { say("Photo is larger than 2 MB. Choose a smaller one.", "err"); $("photo").value = ""; p.style.display = "none"; return; }
+  if (!TYPES[f.type]) { say("Photo must be JPG, PNG or WebP.", "err"); $("photo").value = ""; p.style.display = "none"; return; }
+  say("");
+  p.src = URL.createObjectURL(f); p.style.display = "block";
+});
+
+$("f").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("btn").disabled = true; say("Submitting…");
+  try {
+    let photo_path = null;
+    const file = $("photo").files[0];
+    if (file) {
+      photo_path = crypto.randomUUID() + "." + TYPES[file.type];
+      const up = await db.storage.from("member-photos").upload(photo_path, file, {contentType: file.type});
+      if (up.error) throw up.error;
+    }
+    const ins = await db.from("members").insert({
+      full_name: $("full_name").value.trim(),
+      center: $("center").value,
+      status: $("status").value,
+      age: parseInt($("age").value, 10),
+      position: $("position").value.trim() || null,
+      spiritual_gift: $("gift").value.trim() || null,
+      photo_path
+    });
+    if (ins.error) throw ins.error;
+    $("f").reset(); $("preview").style.display = "none";
+    say("Thank you! Your registration was received.", "ok");
+  } catch (err) {
+    console.error(err);
+    say("Could not submit: " + (err.message || "unknown error") + ". Please try again.", "err");
+  } finally { $("btn").disabled = false; }
+});
+</script>
+</body>
+</html>
