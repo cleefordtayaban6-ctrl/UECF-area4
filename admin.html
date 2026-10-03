@@ -10,23 +10,34 @@
 @media (prefers-color-scheme:dark){:root{--bg:#141a17;--card:#1c2420;--ink:#e8eee9;--mute:#9aa8a0;--line:#33403a;--accent:#5fbf9a;--err:#ff8a80}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 Georgia,serif}
-main{max-width:1100px;margin:0 auto;padding:20px 16px 48px}
+main{max-width:1150px;margin:0 auto;padding:20px 16px 48px}
 h1{font-size:1.5rem;margin:.3em 0 .6em}
 input,select,button{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
 button{background:var(--accent);color:#fff;border:0;font-weight:bold;cursor:pointer}
 @media (prefers-color-scheme:dark){button{color:#0b1410}}
 button.plain{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:normal}
+button.del{background:var(--err);color:#fff}
+button.sm{padding:5px 10px;font-size:.9rem}
+button:disabled{opacity:.6;cursor:wait}
+:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
 #login{max-width:340px;display:grid;gap:10px}
 #bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 #bar .sp{flex:1}
 .wrap{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px}
-table{border-collapse:collapse;width:100%;min-width:760px}
+table{border-collapse:collapse;width:100%;min-width:880px}
 th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
 th{background:var(--bg)}
 td img{width:48px;height:48px;object-fit:cover;border-radius:6px;display:block}
+td.act{white-space:nowrap}
 .err{color:var(--err);font-weight:bold}
 #count{color:var(--mute)}
 [hidden]{display:none!important}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:min(460px,92vw);padding:18px}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog label{display:block;font-weight:bold;margin:10px 0 3px}
+dialog input,dialog select{width:100%}
+dialog small{color:var(--mute)}
+.btns{display:flex;gap:8px;margin-top:16px}.btns button{flex:1}
 </style>
 </head>
 <body>
@@ -51,27 +62,55 @@ td img{width:48px;height:48px;object-fit:cover;border-radius:6px;display:block}
   </div>
   <div class="wrap">
     <table>
-      <thead><tr><th>Photo</th><th>Name</th><th>Center</th><th>Status</th><th>Age</th><th>Position</th><th>Spiritual gift</th><th>Registered</th></tr></thead>
+      <thead><tr><th>Photo</th><th>Name</th><th>Center</th><th>Status</th><th>Age</th><th>Position</th><th>Spiritual gift</th><th>Registered</th><th>Actions</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
 </section>
 </main>
 
+<dialog id="dlg">
+  <form id="ef">
+    <h2 style="margin:0 0 4px;font-size:1.2rem">Edit member</h2>
+    <label for="e_name">Full name</label><input id="e_name" required maxlength="120">
+    <label for="e_center">Center</label><select id="e_center" required></select>
+    <label for="e_status">Status</label><select id="e_status" required></select>
+    <label for="e_age">Age</label><input id="e_age" type="number" min="1" max="120" required>
+    <label for="e_pos">Position</label><input id="e_pos" maxlength="80">
+    <label for="e_gift">Spiritual gift</label><input id="e_gift" maxlength="80">
+    <label for="e_photo">Change photo</label>
+    <input id="e_photo" type="file" accept="image/*">
+    <small>Leave empty to keep the current photo. Max 2 MB.</small>
+    <div id="eerr" class="err" role="alert"></div>
+    <div class="btns">
+      <button id="esave" type="submit">Save changes</button>
+      <button id="ecancel" type="button" class="plain">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-// ====== SAME VALUES AS index.html ======
-const SUPABASE_URL = "https://musedgbzkyrhmlpqhrzk.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_FaQ2rWRMdmFbTjJ_QR0xwQ_K5z0JuHR";
-// =======================================
+// ====== SAME VALUES AS index.html (paste your URL and key here) ======
+const SUPABASE_URL = "https://YOUR-PROJECT-ID.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+// =====================================================================
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = id => document.getElementById(id);
 const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Baro Jerusalem","Pergamo","Patmos","Raniag ti lawag","Galilea","Tesalonica","Galacia","Baro a langit"];
-CENTERS.forEach(c => $("fc").add(new Option(c, c)));
-let all = [], urls = {};
+const STATUSES = ["Student","Working","Not working","Other"];
+const TYPES = {"image/jpeg":"jpg","image/png":"png","image/webp":"webp"};
+const MAX = 2 * 1024 * 1024;
+CENTERS.forEach(c => { $("fc").add(new Option(c, c)); $("e_center").add(new Option(c, c)); });
+STATUSES.forEach(s => $("e_status").add(new Option(s, s)));
+let all = [], urls = {}, editing = null;
 
 function esc(s){ const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+function setSel(sel, val){
+  if (val && ![...sel.options].some(o => o.value === val)) sel.add(new Option(val, val));
+  sel.value = val || "";
+}
 
 async function load(){
   const r = await db.from("members").select("*").order("created_at", {ascending:false});
@@ -98,15 +137,64 @@ function render(){
     <td>${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : ""}</td>
     <td>${esc(m.full_name)}</td><td>${esc(m.center)}</td><td>${esc(m.status)}</td><td>${m.age ?? ""}</td>
     <td>${esc(m.position)}</td><td>${esc(m.spiritual_gift)}</td>
-    <td>${new Date(m.created_at).toLocaleDateString()}</td></tr>`).join("");
+    <td>${new Date(m.created_at).toLocaleDateString()}</td>
+    <td class="act"><button type="button" class="plain sm" data-act="edit" data-id="${m.id}">Edit</button>
+      <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button></td></tr>`).join("");
 }
+
+$("rows").addEventListener("click", e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const m = all.find(x => x.id === b.dataset.id); if (!m) return;
+  if (b.dataset.act === "edit") openEdit(m); else removeMember(m);
+});
+
+async function removeMember(m){
+  if (!confirm("Delete " + m.full_name + "?\nThis also removes the photo and cannot be undone.")) return;
+  const r = await db.from("members").delete().eq("id", m.id).select();
+  if (r.error || !r.data.length) { alert("Could not delete: " + (r.error ? r.error.message : "not allowed. Run add-edit-delete.sql in Supabase.")); return; }
+  if (m.photo_path) await db.storage.from("member-photos").remove([m.photo_path]);
+  await load();
+}
+
+function openEdit(m){
+  editing = m; $("eerr").textContent = ""; $("e_photo").value = "";
+  $("e_name").value = m.full_name; setSel($("e_center"), m.center); setSel($("e_status"), m.status);
+  $("e_age").value = m.age ?? ""; $("e_pos").value = m.position || ""; $("e_gift").value = m.spiritual_gift || "";
+  $("dlg").showModal();
+}
+$("ecancel").onclick = () => $("dlg").close();
+
+$("ef").addEventListener("submit", async e => {
+  e.preventDefault(); $("esave").disabled = true; $("eerr").textContent = "";
+  try {
+    let photo_path = editing.photo_path, oldPath = null;
+    const file = $("e_photo").files[0];
+    if (file) {
+      if (file.size > MAX) throw new Error("Photo is larger than 2 MB.");
+      if (!TYPES[file.type]) throw new Error("Photo must be JPG, PNG or WebP.");
+      const np = crypto.randomUUID() + "." + TYPES[file.type];
+      const up = await db.storage.from("member-photos").upload(np, file, {contentType: file.type});
+      if (up.error) throw up.error;
+      oldPath = editing.photo_path; photo_path = np;
+    }
+    const r = await db.from("members").update({
+      full_name: $("e_name").value.trim(), center: $("e_center").value, status: $("e_status").value,
+      age: parseInt($("e_age").value, 10), position: $("e_pos").value.trim() || null,
+      spiritual_gift: $("e_gift").value.trim() || null, photo_path
+    }).eq("id", editing.id).select();
+    if (r.error) throw r.error;
+    if (!r.data.length) throw new Error("Not allowed. Run add-edit-delete.sql in Supabase.");
+    if (oldPath) await db.storage.from("member-photos").remove([oldPath]);
+    $("dlg").close(); await load();
+  } catch (err) { $("eerr").textContent = "Could not save: " + (err.message || err); }
+  finally { $("esave").disabled = false; }
+});
 
 function csvCell(v){
   v = v == null ? "" : String(v);
-  if (/^[=+\-@]/.test(v)) v = "'" + v;           // blocks spreadsheet formula injection
+  if (/^[=+\-@]/.test(v)) v = "'" + v;
   return '"' + v.replace(/"/g, '""') + '"';
 }
-
 $("csv").onclick = () => {
   const head = ["Full name","Center","Status","Age","Position","Spiritual gift","Photo link (expires in 1 hour)","Registered"];
   const lines = [head.map(csvCell).join(",")].concat(filtered().map(m => [
@@ -121,7 +209,6 @@ $("csv").onclick = () => {
 };
 
 function show(signedIn){ $("login").hidden = signedIn; $("panel").hidden = !signedIn; if (signedIn) load(); }
-
 $("login").addEventListener("submit", async e => {
   e.preventDefault(); $("lerr").textContent = "";
   const r = await db.auth.signInWithPassword({email:$("email").value, password:$("pass").value});
