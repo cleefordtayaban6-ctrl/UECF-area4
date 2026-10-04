@@ -53,7 +53,7 @@ img#preview{width:160px;height:160px}
     </select>
 
     <label for="age">Age *</label>
-    <input id="age" type="number" min="1" max="120" required inputmode="numeric">
+    <input id="age" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" required>
 
     <label for="position">Position</label>
     <input id="position" maxlength="80" placeholder="Leave blank if none">
@@ -92,6 +92,7 @@ if (!CFG.url || CFG.url.includes("YOUR-")) say("Setup incomplete: the admin must
 else if (!window.supabase) say("Could not load the page fully. Check your internet and refresh.", "err");
 else db = supabase.createClient(CFG.url, CFG.key);
 
+$("age").addEventListener("input", () => { $("age").value = $("age").value.replace(/\D/g, "").slice(0, 3); });  // digits only
 const MAX_RAW = 25 * 1024 * 1024;
 function friendly(err){
   console.error(err);

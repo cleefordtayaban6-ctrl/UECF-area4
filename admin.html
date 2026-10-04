@@ -90,7 +90,7 @@ dialog{max-height:92vh;overflow-y:auto}
     <label for="e_name">Full name</label><input id="e_name" required maxlength="120">
     <label for="e_center">Center</label><select id="e_center" required></select>
     <label for="e_status">Status</label><select id="e_status" required></select>
-    <label for="e_age">Age</label><input id="e_age" type="number" min="1" max="120" required>
+    <label for="e_age">Age</label><input id="e_age" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" required>
     <label for="e_pos">Position</label><input id="e_pos" maxlength="80">
     <label for="e_gift">Spiritual gift</label><input id="e_gift" maxlength="80">
     <label for="e_photo">Change photo</label>
@@ -191,11 +191,14 @@ function openEdit(m){
   $("e_age").value = m.age ?? ""; $("e_pos").value = m.position || ""; $("e_gift").value = m.spiritual_gift || "";
   $("dlg").showModal();
 }
+$("e_age").addEventListener("input", () => { $("e_age").value = $("e_age").value.replace(/\D/g, "").slice(0, 3); });
 $("ecancel").onclick = () => $("dlg").close();
 
 $("ef").addEventListener("submit", async e => {
   e.preventDefault(); $("esave").disabled = true; $("eerr").textContent = "";
   try {
+    const ageNum = parseInt($("e_age").value, 10);
+    if (!(ageNum >= 1 && ageNum <= 120)) throw new Error("Please enter a valid age (1 to 120).");
     let photo_path = editing.photo_path, oldPath = null;
     const file = $("e_photo").files[0];
     if (file) {
@@ -208,7 +211,7 @@ $("ef").addEventListener("submit", async e => {
     }
     const r = await db.from("members").update({
       full_name: $("e_name").value.trim(), center: $("e_center").value, status: $("e_status").value,
-      age: parseInt($("e_age").value, 10), position: $("e_pos").value.trim() || "None",
+      age: ageNum, position: $("e_pos").value.trim() || "None",
       spiritual_gift: $("e_gift").value.trim() || "None", photo_path
     }).eq("id", editing.id).select();
     if (r.error) throw r.error;
