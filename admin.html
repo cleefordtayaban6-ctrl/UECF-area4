@@ -38,6 +38,21 @@ dialog label{display:block;font-weight:bold;margin:10px 0 3px}
 dialog input,dialog select{width:100%}
 dialog small{color:var(--mute)}
 .btns{display:flex;gap:8px;margin-top:16px}.btns button{flex:1}
+input,select{font-size:16px}button{min-height:40px}
+dialog{max-height:92vh;overflow-y:auto}
+@media (max-width:700px){
+ main{padding:12px 10px 40px}
+ #bar>*{flex:1 1 100%}#bar #csv,#bar #out{flex:1 1 calc(50% - 4px)}#bar .sp{display:none}
+ .wrap{border:0;background:none;overflow:visible}
+ table,thead,tbody,tr,td{display:block;min-width:0;width:100%}
+ thead{display:none}
+ tr{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;padding:8px 12px}
+ td{border:0;padding:5px 0;display:flex;gap:10px;justify-content:space-between;text-align:right}
+ td::before{content:attr(data-label);font-weight:bold;color:var(--mute);text-align:left}
+ td.ph{justify-content:center}td.ph::before,td.act::before{display:none}
+ td img{width:96px;height:96px}
+ td.act{gap:8px}td.act button{flex:1;min-height:44px}
+}
 </style>
 </head>
 <body>
@@ -89,16 +104,14 @@ dialog small{color:var(--mute)}
   </form>
 </dialog>
 
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-// ====== SAME VALUES AS index.html (paste your URL and key here) ======
-const SUPABASE_URL = "https://musedgbzkyrhmlpqhrzk.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_FaQ2rWRMdmFbTjJ_QR0xwQ_K5z0JuHR";   // the "anon / public" key ONLY
-// =====================================================================
-
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const CFG = window.APP_CONFIG || {};
+if (!CFG.url || CFG.url.includes("YOUR-")) document.body.insertAdjacentHTML("afterbegin", '<p style="padding:12px;color:#b3261e;font-weight:bold">Setup incomplete: open config.js and paste your Supabase URL and key.</p>');
+const db = supabase.createClient(CFG.url || "https://invalid.invalid", CFG.key || "x");
 const $ = id => document.getElementById(id);
-const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Baro Jerusalem","Pergamo","Patmos","Raniag ti lawag","Galilea","Tesalonica","Galacia","Baro a langit"];
+const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Baro Jerusalem","Pergamo","Patmos","Raniag ti lawag","Galilea","Tesalonica","Galacia","Baro a langit","Getsimani"];
 const STATUSES = ["Student","Working","Not working","Other"];
 const TYPES = {"image/jpeg":"jpg","image/png":"png","image/webp":"webp"};
 const MAX = 2 * 1024 * 1024;
@@ -106,23 +119,37 @@ CENTERS.forEach(c => { $("fc").add(new Option(c, c)); $("e_center").add(new Opti
 STATUSES.forEach(s => $("e_status").add(new Option(s, s)));
 let all = [], urls = {}, editing = null;
 
-function esc(s){ const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function setSel(sel, val){
   if (val && ![...sel.options].some(o => o.value === val)) sel.add(new Option(val, val));
   sel.value = val || "";
 }
 
 async function load(){
-  const r = await db.from("members").select("*").order("created_at", {ascending:false});
-  if (r.error) { $("count").textContent = "Error: " + r.error.message; return; }
-  all = r.data;
-  const paths = all.map(m => m.photo_path).filter(Boolean);
-  urls = {};
-  if (paths.length) {
-    const s = await db.storage.from("member-photos").createSignedUrls(paths, 3600);
-    (s.data || []).forEach(x => { if (x.signedUrl) urls[x.path] = x.signedUrl; });
+  $("count").textContent = "Loading…";
+  try {
+    let rows = [], from = 0;
+    while (true) {
+      const r = await db.from("members").select("*").order("created_at", {ascending:false}).range(from, from + 999);
+      if (r.error) {
+        if (/jwt|token|auth/i.test(r.error.message)) { show(false); $("lerr").textContent = "Session expired. Please log in again."; return; }
+        throw r.error;
+      }
+      rows = rows.concat(r.data);
+      if (r.data.length < 1000) break;
+      from += 1000;
+    }
+    all = rows; urls = {};
+    const paths = all.map(m => m.photo_path).filter(Boolean);
+    for (let i = 0; i < paths.length; i += 100) {
+      const s = await db.storage.from("member-photos").createSignedUrls(paths.slice(i, i + 100), 3600);
+      (s.data || []).forEach(x => { if (x.signedUrl) urls[x.path] = x.signedUrl; });
+    }
+    render();
+  } catch (err) {
+    console.error(err);
+    $("count").textContent = "Could not load. Check your internet, then refresh.";
   }
-  render();
 }
 
 function filtered(){
@@ -133,13 +160,15 @@ function filtered(){
 function render(){
   const list = filtered();
   $("count").textContent = list.length + " member" + (list.length === 1 ? "" : "s");
-  $("rows").innerHTML = list.map(m => `<tr>
-    <td>${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : ""}</td>
-    <td>${esc(m.full_name)}</td><td>${esc(m.center)}</td><td>${esc(m.status)}</td><td>${m.age ?? ""}</td>
-    <td>${esc(m.position)}</td><td>${esc(m.spiritual_gift)}</td>
-    <td>${new Date(m.created_at).toLocaleDateString()}</td>
+  $("rows").innerHTML = list.length ? list.map(m => `<tr>
+    <td class="ph">${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img loading="lazy" src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : ""}</td>
+    <td data-label="Name">${esc(m.full_name)}</td><td data-label="Center">${esc(m.center)}</td>
+    <td data-label="Status">${esc(m.status)}</td><td data-label="Age">${m.age ?? ""}</td>
+    <td data-label="Position">${esc(m.position || "None")}</td><td data-label="Spiritual gift">${esc(m.spiritual_gift || "None")}</td>
+    <td data-label="Registered">${new Date(m.created_at).toLocaleDateString()}</td>
     <td class="act"><button type="button" class="plain sm" data-act="edit" data-id="${m.id}">Edit</button>
-      <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button></td></tr>`).join("");
+      <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button></td></tr>`).join("")
+    : '<tr><td colspan="9">No members found.</td></tr>';
 }
 
 $("rows").addEventListener("click", e => {
@@ -179,8 +208,8 @@ $("ef").addEventListener("submit", async e => {
     }
     const r = await db.from("members").update({
       full_name: $("e_name").value.trim(), center: $("e_center").value, status: $("e_status").value,
-      age: parseInt($("e_age").value, 10), position: $("e_pos").value.trim() || null,
-      spiritual_gift: $("e_gift").value.trim() || null, photo_path
+      age: parseInt($("e_age").value, 10), position: $("e_pos").value.trim() || "None",
+      spiritual_gift: $("e_gift").value.trim() || "None", photo_path
     }).eq("id", editing.id).select();
     if (r.error) throw r.error;
     if (!r.data.length) throw new Error("Not allowed. Run add-edit-delete.sql in Supabase.");
@@ -198,7 +227,7 @@ function csvCell(v){
 $("csv").onclick = () => {
   const head = ["Full name","Center","Status","Age","Position","Spiritual gift","Photo link (expires in 1 hour)","Registered"];
   const lines = [head.map(csvCell).join(",")].concat(filtered().map(m => [
-    m.full_name, m.center, m.status, m.age, m.position, m.spiritual_gift,
+    m.full_name, m.center, m.status, m.age, m.position || "None", m.spiritual_gift || "None",
     urls[m.photo_path] || "", new Date(m.created_at).toLocaleString()
   ].map(csvCell).join(",")));
   const blob = new Blob(["\ufeff" + lines.join("\r\n")], {type:"text/csv;charset=utf-8"});
