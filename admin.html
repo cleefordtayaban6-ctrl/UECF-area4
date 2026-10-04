@@ -42,7 +42,7 @@ input,select{font-size:16px}button{min-height:40px}
 dialog{max-height:92vh;overflow-y:auto}
 @media (max-width:700px){
  main{padding:12px 10px 40px}
- #bar>*{flex:1 1 100%}#bar #csv,#bar #out{flex:1 1 calc(50% - 4px)}#bar .sp{display:none}
+ #bar>*{flex:1 1 100%}#bar #csv,#bar #zip{flex:1 1 calc(50% - 4px)}#bar .sp{display:none}
  .wrap{border:0;background:none;overflow:visible}
  table,thead,tbody,tr,td{display:block;min-width:0;width:100%}
  thead{display:none}
@@ -73,6 +73,7 @@ dialog{max-height:92vh;overflow-y:auto}
     <span id="count"></span>
     <span class="sp"></span>
     <button id="csv" type="button">Download CSV</button>
+    <button id="zip" type="button">Download Photos (ZIP)</button>
     <button id="out" type="button" class="plain">Log out</button>
   </div>
   <div class="wrap">
@@ -106,6 +107,7 @@ dialog{max-height:92vh;overflow-y:auto}
 
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 const CFG = window.APP_CONFIG || {};
 if (!CFG.url || CFG.url.includes("YOUR-")) document.body.insertAdjacentHTML("afterbegin", '<p style="padding:12px;color:#b3261e;font-weight:bold">Setup incomplete: open config.js and paste your Supabase URL and key.</p>');
@@ -164,7 +166,7 @@ function render(){
     <td class="ph">${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img loading="lazy" src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : ""}</td>
     <td data-label="Name">${esc(m.full_name)}</td><td data-label="Center">${esc(m.center)}</td>
     <td data-label="Status">${esc(m.status)}</td><td data-label="Age">${m.age ?? ""}</td>
-    <td data-label="Position">${esc(m.position || "None")}</td><td data-label="Spiritual gift">${esc(m.spiritual_gift || "None")}</td>
+    <td data-label="Position">${esc(posOf(m))}</td><td data-label="Spiritual gift">${esc(giftOf(m))}</td>
     <td data-label="Registered">${new Date(m.created_at).toLocaleDateString()}</td>
     <td class="act"><button type="button" class="plain sm" data-act="edit" data-id="${m.id}">Edit</button>
       <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button></td></tr>`).join("")
@@ -188,7 +190,7 @@ async function removeMember(m){
 function openEdit(m){
   editing = m; $("eerr").textContent = ""; $("e_photo").value = "";
   $("e_name").value = m.full_name; setSel($("e_center"), m.center); setSel($("e_status"), m.status);
-  $("e_age").value = m.age ?? ""; $("e_pos").value = m.position || ""; $("e_gift").value = m.spiritual_gift || "";
+  $("e_age").value = m.age ?? ""; $("e_pos").value = posOf(m); $("e_gift").value = m.spiritual_gift || "";
   $("dlg").showModal();
 }
 $("e_age").addEventListener("input", () => { $("e_age").value = $("e_age").value.replace(/\D/g, "").slice(0, 3); });
@@ -211,7 +213,7 @@ $("ef").addEventListener("submit", async e => {
     }
     const r = await db.from("members").update({
       full_name: $("e_name").value.trim(), center: $("e_center").value, status: $("e_status").value,
-      age: ageNum, position: $("e_pos").value.trim() || "None",
+      age: ageNum, position: $("e_pos").value.trim() || "Member",
       spiritual_gift: $("e_gift").value.trim() || "None", photo_path
     }).eq("id", editing.id).select();
     if (r.error) throw r.error;
@@ -222,22 +224,65 @@ $("ef").addEventListener("submit", async e => {
   finally { $("esave").disabled = false; }
 });
 
+function safe(s){ return String(s || "").replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "member"; }
+function posOf(m){ return m.position && m.position.trim() && m.position.trim().toLowerCase() !== "none" ? m.position : "Member"; }
+function giftOf(m){ return m.spiritual_gift && m.spiritual_gift.trim() ? m.spiritual_gift : "None"; }
+function sorted(list){ return [...list].sort((a, b) => (a.center || "").localeCompare(b.center || "") || (a.full_name || "").localeCompare(b.full_name || "")); }
+function photoNames(){          // member id -> "Center/Full Name.jpg" (unique)
+  const used = new Set(), out = {};
+  sorted(all).forEach(m => {
+    if (!m.photo_path) return;
+    const ext = (m.photo_path.split(".").pop() || "jpg").toLowerCase();
+    const base = safe(m.center) + "/" + safe(m.full_name);
+    let n = base + "." + ext, i = 2;
+    while (used.has(n.toLowerCase())) n = base + " (" + (i++) + ")." + ext;
+    used.add(n.toLowerCase()); out[m.id] = n;
+  });
+  return out;
+}
 function csvCell(v){
   v = v == null ? "" : String(v);
   if (/^[=+\-@]/.test(v)) v = "'" + v;
   return '"' + v.replace(/"/g, '""') + '"';
 }
-$("csv").onclick = () => {
-  const head = ["Full name","Center","Status","Age","Position","Spiritual gift","Photo link (expires in 1 hour)","Registered"];
-  const lines = [head.map(csvCell).join(",")].concat(filtered().map(m => [
-    m.full_name, m.center, m.status, m.age, m.position || "None", m.spiritual_gift || "None",
-    urls[m.photo_path] || "", new Date(m.created_at).toLocaleString()
-  ].map(csvCell).join(",")));
-  const blob = new Blob(["\ufeff" + lines.join("\r\n")], {type:"text/csv;charset=utf-8"});
+function csvText(list, names){
+  const head = ["No.","Full Name","Center","Status","Age","Position","Spiritual Gift","Date Registered","Photo File"];
+  const fmt = {year:"numeric", month:"short", day:"2-digit", hour:"numeric", minute:"2-digit"};
+  const rows = sorted(list).map((m, i) => [i + 1, m.full_name, m.center, m.status, m.age, posOf(m), giftOf(m),
+    new Date(m.created_at).toLocaleString("en-US", fmt), names[m.id] || "No photo"]);
+  return "\ufeff" + [head, ...rows].map(r => r.map(csvCell).join(",")).join("\r\n");
+}
+function saveBlob(blob, name){
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "members-" + new Date().toISOString().slice(0,10) + ".csv";
-  a.click();
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+const stamp = () => new Date().toISOString().slice(0, 10);
+$("csv").onclick = () => saveBlob(new Blob([csvText(filtered(), photoNames())], {type:"text/csv;charset=utf-8"}), "members-" + stamp() + ".csv");
+
+$("zip").onclick = async () => {
+  if (!window.JSZip) return alert("The ZIP tool could not load. Check your internet and refresh.");
+  const list = filtered(), names = photoNames(), todo = list.filter(m => urls[m.photo_path] && names[m.id]);
+  if (!todo.length) return alert("There are no photos in this list.");
+  const btn = $("zip"), label = btn.textContent; btn.disabled = true;
+  try {
+    const zip = new JSZip(), queue = [...todo]; let done = 0, failed = 0;
+    const worker = async () => {
+      while (queue.length) {
+        const m = queue.shift();
+        try { const r = await fetch(urls[m.photo_path]); if (!r.ok) throw new Error("http"); zip.file(names[m.id], await r.blob()); }
+        catch (_) { failed++; }
+        btn.textContent = "Photos " + (++done) + "/" + todo.length;
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    btn.textContent = "Zipping…";
+    zip.file("members.csv", csvText(list, names));
+    saveBlob(await zip.generateAsync({type:"blob", compression:"STORE"}), "members-photos-" + stamp() + ".zip");
+    if (failed) alert(failed + " photo(s) could not be downloaded. Refresh the page and try again.");
+  } catch (err) { console.error(err); alert("Could not create the ZIP. Check your internet and try again."); }
+  finally { btn.disabled = false; btn.textContent = label; }
 };
 
 function show(signedIn){ $("login").hidden = signedIn; $("panel").hidden = !signedIn; if (signedIn) load(); }

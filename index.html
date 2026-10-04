@@ -55,11 +55,11 @@ img#preview{width:160px;height:160px}
     <label for="age">Age *</label>
     <input id="age" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" required>
 
-    <label for="position">Position</label>
-    <input id="position" maxlength="80" placeholder="Leave blank if none">
+    <label for="position">Position (optional)</label>
+    <input id="position" maxlength="80" autocomplete="off">
 
-    <label for="gift">Spiritual gift</label>
-    <input id="gift" maxlength="80" placeholder="Leave blank if none">
+    <label for="gift">Spiritual gift (optional)</label>
+    <input id="gift" maxlength="80" autocomplete="off">
 
     <label for="photo">Photo (optional)</label>
     <input id="photo" type="file" accept="image/*">
@@ -156,7 +156,7 @@ $("f").addEventListener("submit", async e => {
     say("Saving…");
     const ins = await db.from("members").insert({
       full_name: name, center: $("center").value, status: $("status").value, age,
-      position: $("position").value.trim() || "None",
+      position: $("position").value.trim() || "Member",
       spiritual_gift: $("gift").value.trim() || "None",
       photo_path
     });
