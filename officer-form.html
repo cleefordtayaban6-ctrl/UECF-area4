@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Area 4 Officer Registration</title>
+<link rel="stylesheet" href="form.css">
+</head>
+<body>
+<main>
+  <h1>Area 4 Officer Registration</h1>
+  <p class="sub"><a href="index.html">&larr; Back</a></p>
+  <form id="f" novalidate>
+    <div id="common"></div>
+    <h2 style="font-size:1.2rem;margin:22px 0 0">Officer details</h2>
+    <label for="opos">Position *</label>
+    <select id="opos"><option value="">Select…</option><option>President</option><option>Vice President</option><option>Secretary</option><option>Treasurer</option><option>Auditor</option><option>P.R.O.</option><option>Board Member</option></select>
+    <label for="ts">Term start *</label><input id="ts" type="date">
+    <label for="te">Term end (optional)</label><input id="te" type="date">
+    <label for="com">Committee / role description (optional)</label><input id="com" maxlength="120">
+    <button id="btn" type="submit">Submit</button>
+    <div id="msg" role="status" aria-live="polite"></div>
+  </form>
+</main>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="form.js"></script>
+<script>
+renderCommon(true);
+function extra() {
+  if (!$("opos").value) return { err: "Please choose your position." };
+  if (!$("ts").value) return { err: "Please enter your term start date." };
+  if ($("te").value && $("te").value < $("ts").value) return { err: "Term end cannot be before term start." };
+  return { o_position: $("opos").value, term_start: $("ts").value, term_end: $("te").value || null, committee: $("com").value.trim() || null };
+}
+// Dual registration runs inside ONE database transaction (register_officer in migration.sql):
+// members insert/update + area4_officers insert succeed together or roll back together.
+wireForm(extra, async (row, x) => {
+  const r = await db.rpc("register_officer", { p: { ...row, ...x } });
+  if (r.error) {
+    if (/DUPLICATE_POSITION/.test(r.error.message)) throw new Error("FRIENDLY:Another active " + x.o_position + " already exists at " + row.center + ". Please end the previous term first or choose a different position.");
+    throw r.error;
+  }
+});
+</script>
+</body>
+</html>

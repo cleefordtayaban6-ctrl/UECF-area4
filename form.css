@@ -1,0 +1,23 @@
+:root{--bg:#f6f7f4;--card:#fff;--ink:#1d2a24;--mute:#5f6d66;--line:#d5dbd6;--accent:#1f5f4a;--err:#b3261e;--warn:#8a5a00}
+@media (prefers-color-scheme:dark){:root{--bg:#141a17;--card:#1c2420;--ink:#e8eee9;--mute:#9aa8a0;--line:#33403a;--accent:#5fbf9a;--err:#ff8a80;--warn:#f0c36a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Georgia,serif}
+main{max-width:520px;margin:0 auto;padding:20px 14px 48px}
+h1{font-size:1.6rem;margin:.4em 0 .2em}p.sub{margin:0 0 1em;color:var(--mute)}
+form,.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
+label{display:block;font-weight:bold;margin:14px 0 4px}
+label.r{font-weight:normal;display:flex;gap:10px;align-items:center;margin:6px 0;min-height:36px}
+label.r input{width:auto;min-height:0}
+input,select{width:100%;min-height:46px;padding:10px;font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px}
+:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+small{color:var(--mute)}
+button,a.btn{display:block;text-align:center;text-decoration:none;margin-top:20px;width:100%;min-height:50px;line-height:50px;padding:0;font:bold 1.05rem Georgia,serif;color:#fff;background:var(--accent);border:0;border-radius:6px;cursor:pointer}
+@media (prefers-color-scheme:dark){button,a.btn{color:#0b1410}}
+button:disabled{opacity:.6;cursor:wait}
+button.plain{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:normal}
+#msg{margin-top:14px;font-weight:bold}#msg.err{color:var(--err)}#msg.ok{color:var(--accent)}
+.hint{color:var(--accent);margin:6px 0 0;font-size:.95rem}.warn{color:var(--warn);margin:6px 0 0;font-size:.95rem}
+img#preview{display:none;width:160px;height:160px;object-fit:cover;margin-top:8px;border-radius:6px;border:1px solid var(--line)}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:min(420px,92vw);padding:18px}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.hp{position:absolute;left:-9999px;height:0;overflow:hidden}

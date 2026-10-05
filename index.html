@@ -3,171 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Member Registration</title>
-<style>
-:root{--bg:#f6f7f4;--card:#fff;--ink:#1d2a24;--mute:#5f6d66;--line:#d5dbd6;--accent:#1f5f4a;--err:#b3261e}
-@media (prefers-color-scheme:dark){:root{--bg:#141a17;--card:#1c2420;--ink:#e8eee9;--mute:#9aa8a0;--line:#33403a;--accent:#5fbf9a;--err:#ff8a80}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Georgia,serif}
-main{max-width:520px;margin:0 auto;padding:20px 14px 48px}
-h1{font-size:1.6rem;margin:.4em 0 .2em}p.sub{margin:0 0 1em;color:var(--mute)}
-form{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
-label{display:block;font-weight:bold;margin:14px 0 4px}
-input,select{width:100%;min-height:46px;padding:10px;font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px}
-:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
-small{color:var(--mute)}
-button{margin-top:20px;width:100%;min-height:50px;font:bold 1.05rem Georgia,serif;color:#fff;background:var(--accent);border:0;border-radius:6px;cursor:pointer}
-@media (prefers-color-scheme:dark){button{color:#0b1410}}
-button:disabled{opacity:.6;cursor:wait}
-#msg{margin-top:14px;font-weight:bold}#msg.err{color:var(--err)}#msg.ok{color:var(--accent)}
-img#preview{display:none;width:120px;height:120px;object-fit:cover;margin-top:8px;border-radius:6px;border:1px solid var(--line)}
-dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:min(420px,92vw);padding:18px}
-dialog::backdrop{background:rgba(0,0,0,.5)}
-button.plain{background:var(--card);color:var(--ink);border:1px solid var(--line);font-weight:normal}
-img#preview{width:160px;height:160px}
-.hp{position:absolute;left:-9999px;height:0;overflow:hidden}
-</style>
+<title>Registration</title>
+<link rel="stylesheet" href="form.css">
 </head>
 <body>
 <main>
-  <h1>Member Registration</h1>
-  <p class="sub">Fill in the details and tap Submit. Registering a child or an elderly family member? Just fill out the form again for each person.</p>
-  <form id="f" novalidate>
-    <label for="full_name">Full name *</label>
-    <input id="full_name" required maxlength="120" autocomplete="name">
-
-    <label for="center">Center *</label>
-    <select id="center" required>
-      <option value="">Select your center…</option>
-      <option>Puon ti Biag</option><option>Damasco</option><option>Ti libro a naselloan</option>
-      <option>Eufrates</option><option>Baro Jerusalem</option><option>Pergamo</option>
-      <option>Patmos</option><option>Raniag ti lawag</option><option>Galilea</option>
-      <option>Tesalonica</option><option>Galacia</option><option>Baro a langit</option>
-      <option>Getsimani</option>
-    </select>
-
-    <label for="status">Status *</label>
-    <select id="status" required>
-      <option value="">Select…</option><option>Student</option><option>Working</option>
-      <option>Not working</option><option>Other</option>
-    </select>
-
-    <label for="age">Age *</label>
-    <input id="age" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" required>
-
-    <label for="position">Position (optional)</label>
-    <input id="position" maxlength="80" autocomplete="off">
-
-    <label for="gift">Spiritual gift (optional)</label>
-    <input id="gift" maxlength="80" autocomplete="off">
-
-    <label for="photo">Photo (optional)</label>
-    <input id="photo" type="file" accept="image/*">
-    <small>The whole face must be clearly visible. Any photo size works.</small><br>
-    <img id="preview" alt="Photo preview">
-    <small id="pvnote" hidden>Is the whole face clearly visible? If not, choose another photo.</small>
-
-    <dialog id="tip">
-      <h2 style="margin:0 0 8px;font-size:1.2rem">Before you choose a photo</h2>
-      <p>Please do <b>not</b> upload just any photo. Make sure the <b>whole face is clearly visible</b>.</p>
-      <button id="tipok" type="button">I understand, choose photo</button>
-      <button id="tipno" type="button" class="plain">Cancel</button>
-    </dialog>
-
-    <div class="hp" aria-hidden="true"><label>Website <input id="website" tabindex="-1" autocomplete="off"></label></div>
-
-    <button id="btn" type="submit">Submit</button>
-    <div id="msg" role="status" aria-live="polite"></div>
-  </form>
+  <h1>Registration</h1>
+  <p class="sub">Choose the form that fits you.</p>
+  <div class="card">
+    <a class="btn" href="member-form.html" style="margin-top:0">Regular Member Registration</a>
+    <a class="btn" href="officer-form.html">Area 4 Officer Registration</a>
+  </div>
 </main>
-
-<script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>
-const $ = id => document.getElementById(id);
-const CFG = window.APP_CONFIG || {};
-const say = (t, c) => { $("msg").textContent = t; $("msg").className = c || ""; };
-let db = null;
-if (!CFG.url || CFG.url.includes("YOUR-")) say("Setup incomplete: the admin must fill in config.js.", "err");
-else if (!window.supabase) say("Could not load the page fully. Check your internet and refresh.", "err");
-else db = supabase.createClient(CFG.url, CFG.key);
-
-$("age").addEventListener("input", () => { $("age").value = $("age").value.replace(/\D/g, "").slice(0, 3); });  // digits only
-const MAX_RAW = 25 * 1024 * 1024;
-function friendly(err){
-  console.error(err);
-  const m = ((err && err.message) || "").toLowerCase();
-  if (!navigator.onLine || m.includes("fetch") || m.includes("network")) return "No internet connection. Check your signal and try again.";
-  return "Something went wrong. Please try again, or tell the admin.";
-}
-// Shrinks any phone photo to ~900px JPEG (about 100 KB)
-function compress(file){
-  return new Promise((res, rej) => {
-    const img = new Image(), u = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(u);
-      const s = Math.min(1, 900 / Math.max(img.width, img.height)), c = document.createElement("canvas");
-      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-      c.toBlob(b => b ? res(b) : rej(new Error("compress")), "image/jpeg", 0.82);
-    };
-    img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("unreadable")); };
-    img.src = u;
-  });
-}
-
-let tipOk = false;   // the reminder is shown every time, because one person may register many people
-$("photo").addEventListener("click", e => { if (tipOk) { tipOk = false; return; } e.preventDefault(); $("tip").showModal(); });
-$("tipok").onclick = () => { $("tip").close(); tipOk = true; $("photo").click(); };
-$("tipno").onclick = () => $("tip").close();
-
-$("photo").addEventListener("change", () => {
-  const f = $("photo").files[0], p = $("preview"); say("");
-  if (!f) { p.style.display = "none"; $("pvnote").hidden = true; return; }
-  if (f.size > MAX_RAW || !f.type.startsWith("image/")) { say("Please choose a smaller photo (JPG or PNG).", "err"); $("photo").value = ""; p.style.display = "none"; return; }
-  p.src = URL.createObjectURL(f); p.style.display = "block"; $("pvnote").hidden = false;
-});
-
-let busy = false;
-$("f").addEventListener("submit", async e => {
-  e.preventDefault();
-  if (busy || !db) return;
-  if ($("website").value) { say("Thank you! Your registration was received.", "ok"); return; } // bot trap
-  const name = $("full_name").value.trim().replace(/\s+/g, " "), age = parseInt($("age").value, 10);
-  if (!name) return say("Please enter your full name.", "err");
-  if (!$("center").value) return say("Please choose your center.", "err");
-  if (!$("status").value) return say("Please choose your status.", "err");
-  if (!(age >= 1 && age <= 120)) return say("Please enter a valid age (1 to 120).", "err");
-  if (!navigator.onLine) return say("No internet connection. Check your signal and try again.", "err");
-
-  busy = true; $("btn").disabled = true;
-  try {
-    let photo_path = null;
-    const file = $("photo").files[0];
-    if (file) {
-      say("Preparing photo…");
-      let blob;
-      try { blob = await compress(file); } catch (_) { throw new Error("photo"); }
-      say("Uploading…");
-      photo_path = crypto.randomUUID() + ".jpg";
-      const up = await db.storage.from("member-photos").upload(photo_path, blob, {contentType: "image/jpeg"});
-      if (up.error) throw up.error;
-    }
-    say("Saving…");
-    const ins = await db.from("members").insert({
-      full_name: name, center: $("center").value, status: $("status").value, age,
-      position: $("position").value.trim() || "Member",
-      spiritual_gift: $("gift").value.trim() || "None",
-      photo_path
-    });
-    if (ins.error) throw ins.error;
-    $("f").reset(); $("preview").style.display = "none"; $("pvnote").hidden = true;
-    say("Thank you! " + name + " is registered. You can fill out the form again for another person.", "ok");
-    $("msg").scrollIntoView({behavior: "smooth", block: "center"});
-  } catch (err) {
-    say(err.message === "photo" ? "This photo could not be read. Try another photo, or submit without one." : friendly(err), "err");
-  } finally { busy = false; $("btn").disabled = false; }
-});
-</script>
 </body>
 </html>

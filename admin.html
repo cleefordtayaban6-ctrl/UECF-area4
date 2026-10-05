@@ -42,7 +42,7 @@ input,select{font-size:16px}button{min-height:40px}
 dialog{max-height:92vh;overflow-y:auto}
 @media (max-width:700px){
  main{padding:12px 10px 40px}
- #bar>*{flex:1 1 100%}#bar #csv,#bar #zip{flex:1 1 calc(50% - 4px)}#bar .sp{display:none}
+ #bar>*{flex:1 1 100%}#bar select{flex:1 1 calc(50% - 4px)}#count{order:-1;font-size:1.15rem;font-weight:bold;color:var(--ink)}#bar #csv,#bar #zip{flex:1 1 calc(50% - 4px)}#bar .sp{display:none}
  .wrap{border:0;background:none;overflow:visible}
  table,thead,tbody,tr,td{display:block;min-width:0;width:100%}
  thead{display:none}
@@ -53,6 +53,11 @@ dialog{max-height:92vh;overflow-y:auto}
  td img{width:96px;height:96px}
  td.act{gap:8px}td.act button{flex:1;min-height:44px}
 }
+.badge{background:var(--accent);color:#fff;border-radius:99px;padding:1px 8px;font-size:.75rem;margin-left:6px}
+@media (prefers-color-scheme:dark){.badge{color:#0b1410}}
+.pill{border:1px solid var(--line);border-radius:99px;padding:1px 8px;margin-left:6px;color:var(--mute)}
+#oc{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:4px 16px 12px}
+#oc h2{font-size:1.15rem;margin:14px 0 4px}#oc ul{margin:0;padding-left:18px}
 </style>
 </head>
 <body>
@@ -69,16 +74,23 @@ dialog{max-height:92vh;overflow-y:auto}
 <section id="panel" hidden>
   <div id="bar">
     <select id="fc"><option value="">All centers</option></select>
+    <select id="ft"><option value="">All registrants</option><option value="m">Regular Members</option><option value="o">Area 4 Officers Only</option></select>
+    <select id="fcat"><option value="">All categories</option></select>
+    <select id="fpos"><option value="">All positions</option></select>
+    <select id="fv"><option value="t">Table view</option><option value="c">Officers by Center</option></select>
     <input id="q" type="search" placeholder="Search name…">
     <span id="count"></span>
     <span class="sp"></span>
+    <button id="ref" type="button" class="plain">Refresh</button>
     <button id="csv" type="button">Download CSV</button>
+    <button id="xls" type="button">Download Excel</button>
     <button id="zip" type="button">Download Photos (ZIP)</button>
     <button id="out" type="button" class="plain">Log out</button>
   </div>
-  <div class="wrap">
+  <div id="oc" hidden></div>
+  <div class="wrap" id="tw">
     <table>
-      <thead><tr><th>Photo</th><th>Name</th><th>Center</th><th>Status</th><th>Age</th><th>Position</th><th>Spiritual gift</th><th>Registered</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Photo</th><th>Name</th><th>Category</th><th>Civil status</th><th>Center</th><th>Status</th><th>Age</th><th>Position</th><th>Spiritual gift</th><th>Registered</th><th>Actions</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -88,12 +100,29 @@ dialog{max-height:92vh;overflow-y:auto}
 <dialog id="dlg">
   <form id="ef">
     <h2 style="margin:0 0 4px;font-size:1.2rem">Edit member</h2>
-    <label for="e_name">Full name</label><input id="e_name" required maxlength="120">
+    <label for="e_first">First name</label><input id="e_first" required maxlength="60">
+    <label for="e_mid">Middle name</label><input id="e_mid" maxlength="60">
+    <label for="e_last">Last name (with suffix)</label><input id="e_last" required maxlength="70">
+    <label for="e_dob">Date of birth</label><input id="e_dob" type="date">
+    <label for="e_gender">Gender</label><select id="e_gender"></select>
+    <label for="e_civil">Civil status</label><select id="e_civil"></select>
+    <label for="e_cat">Category</label><select id="e_cat"></select>
     <label for="e_center">Center</label><select id="e_center" required></select>
-    <label for="e_status">Status</label><select id="e_status" required></select>
+    <label for="e_status">Status</label><select id="e_status"></select>
     <label for="e_age">Age</label><input id="e_age" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" required>
     <label for="e_pos">Position</label><input id="e_pos" maxlength="80">
     <label for="e_gift">Spiritual gift</label><input id="e_gift" maxlength="80">
+    <label for="e_phone">Contact number</label><input id="e_phone" maxlength="20">
+    <label for="e_email">Email</label><input id="e_email" type="email" maxlength="120">
+    <label for="e_addr">Address</label><input id="e_addr" maxlength="200">
+    <label class="chk"><input id="e_off" type="checkbox" style="width:auto"> Area 4 Officer</label>
+    <div id="e_ofs" hidden>
+      <small>The Center above is the assigned center.</small>
+      <label for="e_opos">Officer position</label><select id="e_opos"></select>
+      <label for="e_ts">Term start</label><input id="e_ts" type="date">
+      <label for="e_te">Term end</label><input id="e_te" type="date">
+      <label for="e_com">Committee / role</label><input id="e_com" maxlength="120">
+    </div>
     <label for="e_photo">Change photo</label>
     <input id="e_photo" type="file" accept="image/*">
     <small>Leave empty to keep the current photo. Max 2 MB.</small>
@@ -118,7 +147,17 @@ const STATUSES = ["Student","Working","Not working","Other"];
 const TYPES = {"image/jpeg":"jpg","image/png":"png","image/webp":"webp"};
 const MAX = 2 * 1024 * 1024;
 CENTERS.forEach(c => { $("fc").add(new Option(c, c)); $("e_center").add(new Option(c, c)); });
-STATUSES.forEach(s => $("e_status").add(new Option(s, s)));
+const CIVIL = ["Single","Married","Separated","Widow (Woman)","Widower (Man)"];
+const CATS = ["Junior FYS","Senior FYS","Katandaan"];
+const POS = ["President","Vice President","Secretary","Treasurer","Auditor","P.R.O.","Board Member"];
+[["e_status",STATUSES],["e_gender",["Male","Female"]],["e_civil",CIVIL],["e_cat",CATS],["e_opos",POS]].forEach(([id, a]) => { $(id).add(new Option("—", "")); a.forEach(v => $(id).add(new Option(v, v))); });
+CATS.forEach(c => $("fcat").add(new Option(c, c))); POS.forEach(c => $("fpos").add(new Option(c, c)));
+$("e_off").onchange = () => { $("e_ofs").hidden = !$("e_off").checked; };
+function ageOf(dob){ const d = new Date(dob + "T00:00:00"), n = new Date(); if (!dob || isNaN(d) || d > n) return null;
+  let a = n.getFullYear() - d.getFullYear(); if (n.getMonth() < d.getMonth() || (n.getMonth() === d.getMonth() && n.getDate() < d.getDate())) a--; return a; }
+// Marriage/widowhood override: a non-Single person under 30 recorded as Katandaan
+function override(m){ return m.civil_status && m.civil_status !== "Single" && m.category === "Katandaan" && m.age != null && m.age < 30
+  ? `<small class="pill">${m.civil_status === "Married" ? "married override" : "marital status override"}</small>` : ""; }
 let all = [], urls = {}, editing = null;
 
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -142,6 +181,9 @@ async function load(){
       from += 1000;
     }
     all = rows; urls = {};
+    const o = await db.from("area4_officers").select("*");   // per-center officer terms; active term preferred
+    all.forEach(m => m.off = null);
+    (o.data || []).forEach(x => { const m = all.find(y => y.id === x.member_id); if (m && (!m.off || !x.term_end)) m.off = x; });
     const paths = all.map(m => m.photo_path).filter(Boolean);
     for (let i = 0; i < paths.length; i += 100) {
       const s = await db.storage.from("member-photos").createSignedUrls(paths.slice(i, i + 100), 3600);
@@ -154,23 +196,37 @@ async function load(){
   }
 }
 
+// Every export uses filtered(), so exports always respect Type/Category/Position/Center/search
 function filtered(){
-  const c = $("fc").value, q = $("q").value.trim().toLowerCase();
-  return all.filter(m => (!c || m.center === c) && (!q || m.full_name.toLowerCase().includes(q)));
+  const c = $("fc").value, q = $("q").value.trim().toLowerCase(), t = $("ft").value, g = $("fcat").value, p = $("fpos").value;
+  return all.filter(m => (!c || m.center === c) && (!q || (m.full_name || "").toLowerCase().includes(q))
+    && (!t || (t === "o") === !!m.is_officer) && (!g || m.category === g) && (!p || (m.off && m.off.position === p)));
 }
 
 function render(){
-  const list = filtered();
-  $("count").textContent = list.length + " member" + (list.length === 1 ? "" : "s");
+  const oc = $("fv").value === "c", list = oc ? filtered().filter(m => m.off) : filtered();
+  $("count").textContent = list.length + (oc ? " officer" : " member") + (list.length === 1 ? "" : "s") + (!oc && list.length !== all.length ? " (of " + all.length + " total)" : "");
+  $("tw").hidden = oc; $("oc").hidden = !oc;
+  if (oc) return renderOfficers(list);
   $("rows").innerHTML = list.length ? list.map(m => `<tr>
     <td class="ph">${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img loading="lazy" src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : ""}</td>
-    <td data-label="Name">${esc(m.full_name)}</td><td data-label="Center">${esc(m.center)}</td>
+    <td data-label="Name">${esc(m.full_name)}${m.is_officer ? '<span class="badge">Officer</span>' : ""}</td>
+    <td data-label="Category">${esc(m.category)}${override(m)}</td><td data-label="Civil status">${esc(m.civil_status)}</td>
+    <td data-label="Center">${esc(m.center)}</td>
     <td data-label="Status">${esc(m.status)}</td><td data-label="Age">${m.age ?? ""}</td>
     <td data-label="Position">${esc(posOf(m))}</td><td data-label="Spiritual gift">${esc(giftOf(m))}</td>
     <td data-label="Registered">${new Date(m.created_at).toLocaleDateString()}</td>
     <td class="act"><button type="button" class="plain sm" data-act="edit" data-id="${m.id}">Edit</button>
       <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button></td></tr>`).join("")
-    : '<tr><td colspan="9">No members found.</td></tr>';
+    : '<tr><td colspan="11">No members found.</td></tr>';
+}
+function renderOfficers(list){
+  const g = {};
+  list.forEach(m => (g[m.off.center || m.center] = g[m.off.center || m.center] || []).push(m));
+  const cs = Object.keys(g).sort();
+  $("oc").innerHTML = cs.length ? cs.map(c => `<h2>${esc(c)}</h2><ul>` + g[c].sort((a, b) => POS.indexOf(a.off.position) - POS.indexOf(b.off.position))
+    .map(m => `<li><b>${esc(m.off.position)}</b> — ${esc(m.full_name)}${m.off.term_end ? " <small>(term ended)</small>" : ""}</li>`).join("") + "</ul>").join("")
+    : "<p>No officers found.</p>";
 }
 
 $("rows").addEventListener("click", e => {
@@ -189,8 +245,14 @@ async function removeMember(m){
 
 function openEdit(m){
   editing = m; $("eerr").textContent = ""; $("e_photo").value = "";
-  $("e_name").value = m.full_name; setSel($("e_center"), m.center); setSel($("e_status"), m.status);
+  const p = (m.full_name || "").split(" "), o = m.off || {};
+  $("e_first").value = m.first_name ?? p[0] ?? ""; $("e_mid").value = m.middle_name || ""; $("e_last").value = m.last_name ?? p.slice(1).join(" ");
+  $("e_dob").value = m.date_of_birth || ""; setSel($("e_gender"), m.gender); setSel($("e_civil"), m.civil_status); setSel($("e_cat"), m.category);
+  setSel($("e_center"), m.center); setSel($("e_status"), m.status);
   $("e_age").value = m.age ?? ""; $("e_pos").value = posOf(m); $("e_gift").value = m.spiritual_gift || "";
+  $("e_phone").value = m.contact_number || ""; $("e_email").value = m.email || ""; $("e_addr").value = m.address || "";
+  $("e_off").checked = !!m.is_officer; $("e_ofs").hidden = !m.is_officer;
+  setSel($("e_opos"), o.position); $("e_ts").value = o.term_start || ""; $("e_te").value = o.term_end || ""; $("e_com").value = o.committee || "";
   $("dlg").showModal();
 }
 $("e_age").addEventListener("input", () => { $("e_age").value = $("e_age").value.replace(/\D/g, "").slice(0, 3); });
@@ -199,22 +261,38 @@ $("ecancel").onclick = () => $("dlg").close();
 $("ef").addEventListener("submit", async e => {
   e.preventDefault(); $("esave").disabled = true; $("eerr").textContent = "";
   try {
-    const ageNum = parseInt($("e_age").value, 10);
+    const dob = $("e_dob").value || null; let ageNum = parseInt($("e_age").value, 10);
+    if (dob && ageOf(dob) != null) ageNum = ageOf(dob);
     if (!(ageNum >= 1 && ageNum <= 120)) throw new Error("Please enter a valid age (1 to 120).");
+    const first = $("e_first").value.trim(), mid = $("e_mid").value.trim(), last = $("e_last").value.trim();
+    if (!first || !last) throw new Error("First and last name are required.");
+    const isOff = $("e_off").checked;
+    if (isOff && (!$("e_opos").value || !$("e_ts").value)) throw new Error("Officers need a position and a term start.");
+    // Officer row first, so a per-center uniqueness failure stops the save before anything else changes
+    if (isOff) {
+      const o = {center: $("e_center").value, position: $("e_opos").value, term_start: $("e_ts").value || null, term_end: $("e_te").value || null, committee: $("e_com").value.trim() || null};
+      const r = await (editing.off ? db.from("area4_officers").update(o).eq("id", editing.off.id) : db.from("area4_officers").insert({...o, member_id: editing.id}));
+      if (r.error) throw new Error(r.error.code === "23505" ? "Another active " + o.position + " already exists at " + o.center + "." : r.error.message);
+    } else if (editing.off) {
+      const r = await db.from("area4_officers").delete().eq("member_id", editing.id); if (r.error) throw r.error;
+    }
     let photo_path = editing.photo_path, oldPath = null;
     const file = $("e_photo").files[0];
     if (file) {
       if (file.size > MAX) throw new Error("Photo is larger than 2 MB.");
       if (!TYPES[file.type]) throw new Error("Photo must be JPG, PNG or WebP.");
-      const np = crypto.randomUUID() + "." + TYPES[file.type];
+      const np = ((window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(36).slice(2)) + "." + TYPES[file.type];
       const up = await db.storage.from("member-photos").upload(np, file, {contentType: file.type});
       if (up.error) throw up.error;
       oldPath = editing.photo_path; photo_path = np;
     }
     const r = await db.from("members").update({
-      full_name: $("e_name").value.trim(), center: $("e_center").value, status: $("e_status").value,
-      age: ageNum, position: $("e_pos").value.trim() || "Member",
-      spiritual_gift: $("e_gift").value.trim() || "None", photo_path
+      first_name: first, middle_name: mid || null, last_name: last, full_name: [first, mid, last].filter(Boolean).join(" "),
+      date_of_birth: dob, gender: $("e_gender").value || null, civil_status: $("e_civil").value || null, category: $("e_cat").value || null,
+      center: $("e_center").value, status: $("e_status").value || null, age: ageNum, is_officer: isOff,
+      position: (isOff && $("e_opos").value) || $("e_pos").value.trim() || "Member",
+      spiritual_gift: $("e_gift").value.trim() || "None", contact_number: $("e_phone").value.trim() || null,
+      email: $("e_email").value.trim() || null, address: $("e_addr").value.trim() || null, photo_path
     }).eq("id", editing.id).select();
     if (r.error) throw r.error;
     if (!r.data.length) throw new Error("Not allowed. Run add-edit-delete.sql in Supabase.");
@@ -245,12 +323,19 @@ function csvCell(v){
   if (/^[=+\-@]/.test(v)) v = "'" + v;
   return '"' + v.replace(/"/g, '""') + '"';
 }
-function csvText(list, names){
-  const head = ["No.","Full Name","Center","Status","Age","Position","Spiritual Gift","Date Registered","Photo File"];
+function tableData(list, names){
+  const head = ["No.","Full Name","First Name","Middle Name","Last Name","Date of Birth","Gender","Civil Status","Category","Category Note","Officer","Officer Position","Center","Term Start","Term End","Committee","Status","Age","Position","Spiritual Gift","Contact","Email","Address","Date Registered","Photo File"];
   const fmt = {year:"numeric", month:"short", day:"2-digit", hour:"numeric", minute:"2-digit"};
-  const rows = sorted(list).map((m, i) => [i + 1, m.full_name, m.center, m.status, m.age, posOf(m), giftOf(m),
-    new Date(m.created_at).toLocaleString("en-US", fmt), names[m.id] || "No photo"]);
-  return "\ufeff" + [head, ...rows].map(r => r.map(csvCell).join(",")).join("\r\n");
+  const rows = sorted(list).map((m, i) => { const o = m.off || {}; return [i + 1, m.full_name, m.first_name, m.middle_name, m.last_name, m.date_of_birth, m.gender, m.civil_status, m.category,
+    override(m) ? (m.civil_status === "Married" ? "married override" : "marital status override") : "", m.is_officer ? "Yes" : "No", o.position, m.center, o.term_start, o.term_end, o.committee,
+    m.status, m.age, posOf(m), giftOf(m), m.contact_number, m.email, m.address, new Date(m.created_at).toLocaleString("en-US", fmt), names[m.id] || "No photo"]; });
+  return [head, ...rows];
+}
+function csvText(list, names){ return "\ufeff" + tableData(list, names).map(r => r.map(csvCell).join(",")).join("\r\n"); }
+// Excel: an HTML table saved as .xls opens natively in Excel/LibreOffice (no external library needed)
+function xlsText(list, names){
+  const cell = v => { v = v == null ? "" : String(v); return "<td>" + esc(/^[=+\-@]/.test(v) ? "'" + v : v) + "</td>"; };
+  return '<html><head><meta charset="utf-8"></head><body><table border="1">' + tableData(list, names).map(r => "<tr>" + r.map(cell).join("") + "</tr>").join("") + "</table></body></html>";
 }
 function saveBlob(blob, name){
   const a = document.createElement("a");
@@ -292,7 +377,9 @@ $("login").addEventListener("submit", async e => {
   if (r.error) $("lerr").textContent = "Login failed: " + r.error.message; else show(true);
 });
 $("out").onclick = async () => { await db.auth.signOut(); show(false); };
-$("fc").onchange = $("q").oninput = render;
+$("ref").onclick = load;
+["fc","ft","fcat","fpos","fv"].forEach(id => $(id).onchange = render); $("q").oninput = render;
+$("xls").onclick = () => saveBlob(new Blob([xlsText(filtered(), photoNames())], {type:"application/vnd.ms-excel"}), "members-" + stamp() + ".xls");
 db.auth.getSession().then(r => show(!!r.data.session));
 </script>
 </body>

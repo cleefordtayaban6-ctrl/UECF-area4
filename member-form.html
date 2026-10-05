@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Member Registration</title>
+<link rel="stylesheet" href="form.css">
+</head>
+<body>
+<main>
+  <h1>Regular Member Registration</h1>
+  <p class="sub"><a href="index.html">&larr; Back</a> · Registering a child or an elder? Fill out the form again for each person.</p>
+  <form id="f" novalidate>
+    <div id="common"></div>
+    <button id="btn" type="submit">Submit</button>
+    <div id="msg" role="status" aria-live="polite"></div>
+  </form>
+</main>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="form.js"></script>
+<script>
+renderCommon(false);
+wireForm(null, async row => { const r = await db.from("members").insert(row); if (r.error) throw r.error; });
+</script>
+</body>
+</html>
