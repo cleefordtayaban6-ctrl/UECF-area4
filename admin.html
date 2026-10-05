@@ -59,6 +59,7 @@ dialog{max-height:92vh;overflow-y:auto}
 #oc{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:4px 16px 12px}
 #oc h2{font-size:1.15rem;margin:14px 0 4px}#oc ul{margin:0;padding-left:18px}
 .chk{display:flex;gap:8px;align-items:center;font-weight:normal;cursor:pointer}
+td.sel input{width:22px;height:22px;min-height:0;padding:0}
 </style>
 </head>
 <body>
@@ -87,13 +88,15 @@ dialog{max-height:92vh;overflow-y:auto}
     <button id="csv" type="button">Download CSV</button>
     <button id="xls" type="button">Download Excel</button>
     <button id="zip" type="button">Download Photos (ZIP)</button>
+    <button id="selbtn" type="button" class="plain">Select all shown</button>
+    <button id="delsel" type="button" class="del" hidden>Delete selected (0)</button>
     <button id="delall" type="button" class="del">Delete all</button>
     <button id="out" type="button" class="plain">Log out</button>
   </div>
   <div id="oc" hidden></div>
   <div class="wrap" id="tw">
     <table>
-      <thead><tr><th>Photo</th><th>Name</th><th>Category</th><th>Civil status</th><th>Center</th><th>Status</th><th>Age</th><th>Position</th><th>Spiritual gift</th><th>Registered</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Select</th><th>Photo</th><th>Name</th><th>Category</th><th>Civil status</th><th>Center</th><th>Status</th><th>Age</th><th>Position</th><th>Spiritual gift</th><th>Registered</th><th>Actions</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -189,6 +192,7 @@ async function load(){
       from += 1000;
     }
     all = rows; urls = {};
+    [...sel].forEach(id => { if (!all.some(m => m.id === id)) sel.delete(id); });
     const o = await db.from("area4_officers").select("*");   // per-center officer terms; active term preferred
     all.forEach(m => m.off = null);
     (o.data || []).forEach(x => { const m = all.find(y => y.id === x.member_id); if (m && (!m.off || !x.term_end)) m.off = x; });
@@ -214,10 +218,11 @@ function filtered(){
 function render(){
   const oc = $("fv").value === "c", list = oc ? filtered().filter(m => m.off) : filtered();
   $("count").textContent = list.length + (oc ? " officer" : " member") + (list.length === 1 ? "" : "s") + (!oc && list.length !== all.length ? " (of " + all.length + " total)" : "");
-  { const n = filtered().length; $("delall").textContent = n === all.length ? "Delete all" : "Delete shown (" + n + ")"; }
+  { const n = filtered().length; $("delall").textContent = n === all.length ? "Delete all" : "Delete shown (" + n + ")"; } updSel();
   $("tw").hidden = oc; $("oc").hidden = !oc;
   if (oc) return renderOfficers(list);
   $("rows").innerHTML = list.length ? list.map(m => `<tr>
+    <td class="sel" data-label="Select"><input type="checkbox" data-sel="${m.id}" ${sel.has(m.id) ? "checked" : ""} aria-label="Select ${esc(m.full_name)}"></td>
     <td class="ph">${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img loading="lazy" src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : ""}</td>
     <td data-label="Name">${esc(m.full_name)}${m.is_officer ? '<span class="badge">Officer</span>' : ""}</td>
     <td data-label="Category">${esc(m.category)}${override(m)}</td><td data-label="Civil status">${esc(m.civil_status)}</td>
@@ -227,7 +232,7 @@ function render(){
     <td data-label="Registered">${new Date(m.created_at).toLocaleDateString()}</td>
     <td class="act"><button type="button" class="plain sm" data-act="edit" data-id="${m.id}">Edit</button>
       <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button></td></tr>`).join("")
-    : '<tr><td colspan="11">No members found.</td></tr>';
+    : '<tr><td colspan="12">No members found.</td></tr>';
 }
 function renderOfficers(list){
   const g = {};
@@ -390,16 +395,27 @@ $("login").addEventListener("submit", async e => {
 });
 $("out").onclick = async () => { await db.auth.signOut(); show(false); };
 $("ref").onclick = load;
-// DELETE ALL / DELETE SHOWN: removes every record in the current (filtered) list plus their photos.
-// Officer rows are removed automatically (ON DELETE CASCADE). Safeguards: confirm + type DELETE + automatic CSV backup.
-$("delall").onclick = async () => {
-  const list = filtered();
-  if (!list.length) return alert("There is nothing to delete.");
-  const scope = list.length === all.length ? "ALL " + all.length + " members" : list.length + " members shown by the current filters (out of " + all.length + " total)";
+// SELECTIVE DELETE: tick the rows you want. Only selected rows that are still visible under the current
+// filters are ever deleted, so hidden rows can never be removed by accident.
+const sel = new Set();
+const selected = () => filtered().filter(m => sel.has(m.id));
+function updSel(){
+  const oc = $("fv").value === "c", n = selected().length, shown = filtered().length;
+  $("delsel").hidden = oc || !n; $("delsel").textContent = "Delete selected (" + n + ")";
+  $("selbtn").hidden = oc; $("selbtn").textContent = n && n === shown ? "Clear selection" : "Select all shown";
+}
+$("rows").addEventListener("change", e => {
+  const c = e.target.closest("input[data-sel]"); if (!c) return;
+  c.checked ? sel.add(c.dataset.sel) : sel.delete(c.dataset.sel); updSel();
+});
+$("selbtn").onclick = () => { const f = filtered(); if (selected().length === f.length) f.forEach(m => sel.delete(m.id)); else f.forEach(m => sel.add(m.id)); render(); };
+
+// Shared by "Delete all/shown" and "Delete selected": confirm + type DELETE + automatic CSV backup, then
+// delete in batches of 50 with their photos (officer rows go automatically via ON DELETE CASCADE).
+async function deleteMembers(list, scope, btn){
   if (!confirm("You are about to PERMANENTLY delete " + scope + " and their photos.\nThis cannot be undone.\n\nA CSV backup will download first. Continue?")) return;
   if ((prompt("Type DELETE (capital letters) to confirm.") || "").trim() !== "DELETE") return alert("Cancelled. Nothing was deleted.");
-  const btn = $("delall"), label = btn.textContent; btn.disabled = true;
-  let done = 0;
+  const label = btn.textContent; btn.disabled = true; let done = 0;
   try {
     saveBlob(new Blob([csvText(list, photoNames())], {type:"text/csv;charset=utf-8"}), "backup-before-delete-" + stamp() + ".csv");
     await new Promise(r => setTimeout(r, 1500));            // let the backup download start
@@ -416,6 +432,14 @@ $("delall").onclick = async () => {
     console.error(err);
     alert("Stopped after deleting " + done + " of " + list.length + ". Check your internet and your admin login, then refresh.");
   } finally { btn.disabled = false; btn.textContent = label; await load(); }
+}
+$("delall").onclick = () => {
+  const l = filtered(); if (!l.length) return alert("There is nothing to delete.");
+  deleteMembers(l, l.length === all.length ? "ALL " + all.length + " members" : l.length + " members shown by the current filters (out of " + all.length + " total)", $("delall"));
+};
+$("delsel").onclick = () => {
+  const l = selected(); if (!l.length) return;
+  deleteMembers(l, l.length + " selected member" + (l.length === 1 ? "" : "s"), $("delsel"));
 };
 ["fc","ft","fcat","fpos","fv"].forEach(id => $(id).onchange = render); $("q").oninput = render;
 $("xls").onclick = () => saveBlob(new Blob([xlsText(filtered(), photoNames())], {type:"application/vnd.ms-excel"}), "members-" + stamp() + ".xls");
