@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Area 4 Officer Registration</title>
-<link rel="stylesheet" href="form.css?v=6">
+<link rel="stylesheet" href="form.css?v=1">
 </head>
 <body>
 <main>
@@ -13,11 +13,16 @@
   <form id="f" novalidate>
     <div id="common"></div>
     <h2 style="font-size:1.2rem;margin:22px 0 0">Officer details</h2>
+    <fieldset class="lvl"><legend>Officer type *</legend>
+      <label class="r"><input type="checkbox" id="lv_area"> Area Officer</label>
+      <label class="r"><input type="checkbox" id="lv_local"> Local Officer</label>
+      <label class="r"><input type="checkbox" id="lv_both"> Both (Area and Local)</label>
+      <small>Tick Both if you serve at Area 4 and at your local center.</small>
+    </fieldset>
     <label for="opos">Position *</label>
     <select id="opos"><option value="">Select…</option><option>President</option><option>Vice President</option><option>Secretary</option><option>Treasurer</option><option>Auditor</option><option>P.R.O.</option><option>Board Member</option><option value="__other">Others (type your position)</option></select>
     <input id="opos_o" maxlength="60" placeholder="Type your position" aria-label="Other position" autocomplete="off" hidden style="margin-top:8px">
-    <label for="ts">Term start *</label><input id="ts" type="date">
-    <label for="te">Term end (optional)</label><input id="te" type="date"><small class="skip">Optional: you can skip this if you don't want to fill it in.</small>
+    <label for="term">Term *</label><select id="term"></select>
     <label for="com">Committee / role description (optional)</label><input id="com" maxlength="120"><small class="skip">Optional: you can skip this if you don't want to fill it in.</small>
     <button id="btn" type="submit">Submit</button>
     <div id="msg" role="status" aria-live="polite"></div>
@@ -25,11 +30,21 @@
 </main>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="form.js?v=6"></script>
+<script src="form.js?v=1"></script>
 <script>
 renderCommon(true);
 $("opos").onchange = () => { $("opos_o").hidden = $("opos").value !== "__other"; };
+// Fixed term. To add another term later, add a line: [label, start date, end date]
+const TERMS = [["2026\u20132028", "2026-01-01", "2028-12-31"]];
+TERMS.forEach(t => $("term").add(new Option(t[0], t[0])));
+$("f").addEventListener("reset", () => setTimeout(() => { $("opos_o").hidden = true; }, 0));
+// Officer type: "Both" ticks Area + Local; ticking both by hand ticks "Both"
+const lvA = $("lv_area"), lvL = $("lv_local"), lvB = $("lv_both");
+lvB.onchange = () => { lvA.checked = lvL.checked = lvB.checked; };
+lvA.onchange = lvL.onchange = () => { lvB.checked = lvA.checked && lvL.checked; };
 function extra() {
+  const levels = [lvA.checked && "Area", lvL.checked && "Local"].filter(Boolean);
+  if (!levels.length) return { err: "Please choose Area Officer, Local Officer or Both." };
   if (!$("opos").value) return { err: "Please choose your position." };
   // Typed position: tidy spacing; if it matches a listed position, use the listed spelling (keeps per-center uniqueness reliable)
   let pos = $("opos").value;
@@ -39,16 +54,16 @@ function extra() {
     const listed = [...$("opos").options].map(o => o.text).find(t => t.toLowerCase() === pos.toLowerCase());
     if (listed) pos = listed;
   }
-  if (!$("ts").value) return { err: "Please enter your term start date." };
-  if ($("te").value && $("te").value < $("ts").value) return { err: "Term end cannot be before term start." };
-  return { o_position: pos, term_start: $("ts").value, term_end: $("te").value || null, committee: $("com").value.trim() || null };
+  const t = TERMS.find(x => x[0] === $("term").value);
+  if (!t) return { err: "Please choose your term." };
+  return { o_position: pos, levels, term_start: t[1], term_end: t[2], committee: $("com").value.trim() || null };
 }
 // Dual registration runs inside ONE database transaction (register_officer in migration.sql):
 // members insert/update + area4_officers insert succeed together or roll back together.
 wireForm(extra, async (row, x) => {
   const r = await db.rpc("register_officer", { p: { ...row, ...x } });
   if (r.error) {
-    if (/DUPLICATE_POSITION/.test(r.error.message)) throw new Error("FRIENDLY:Another active " + x.o_position + " already exists at " + row.center + ". Please end the previous term first or choose a different position.");
+    if (/DUPLICATE_POSITION/.test(r.error.message)) throw new Error("FRIENDLY:Another " + x.o_position + " is already registered at " + row.center + " for this term (" + x.levels.join(" and ") + "). Please choose a different position or tell the admin.");
     throw r.error;
   }
 });

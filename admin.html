@@ -27,7 +27,7 @@ button:disabled{opacity:.6;cursor:wait}
 table{border-collapse:collapse;width:100%;min-width:880px}
 th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
 th{background:var(--bg)}
-td img{width:48px;height:48px;object-fit:cover;border-radius:6px;display:block}
+td img{width:48px;height:60px;object-fit:cover;object-position:top;border-radius:6px;display:block}
 td.act{white-space:nowrap}
 .err{color:var(--err);font-weight:bold}
 #count{color:var(--mute)}
@@ -50,7 +50,7 @@ dialog{max-height:92vh;overflow-y:auto}
  td{border:0;padding:5px 0;display:flex;gap:10px;justify-content:space-between;text-align:right}
  td::before{content:attr(data-label);font-weight:bold;color:var(--mute);text-align:left}
  td.ph{justify-content:center}td.ph::before,td.act::before{display:none}
- td img{width:96px;height:96px}
+ td img{width:96px;height:120px}
  td.act{gap:8px}td.act button{flex:1;min-height:44px}
 }
 .badge{background:var(--accent);color:#fff;border-radius:99px;padding:1px 8px;font-size:.75rem;margin-left:6px}
@@ -60,6 +60,9 @@ dialog{max-height:92vh;overflow-y:auto}
 #oc h2{font-size:1.15rem;margin:14px 0 4px}#oc ul{margin:0;padding-left:18px}
 .chk{display:flex;gap:8px;align-items:center;font-weight:normal;cursor:pointer}
 td.sel input{width:22px;height:22px;min-height:0;padding:0}
+.nophoto{color:var(--mute);font-size:.85rem}
+#e_prev{display:block;width:120px;height:auto;max-height:160px;object-fit:contain;margin:6px 0;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
+fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bold;padding:0}
 </style>
 </head>
 <body>
@@ -96,7 +99,7 @@ td.sel input{width:22px;height:22px;min-height:0;padding:0}
   <div id="oc" hidden></div>
   <div class="wrap" id="tw">
     <table>
-      <thead><tr><th>Select</th><th>Photo</th><th>Name</th><th>Category</th><th>Civil status</th><th>Center</th><th>Status</th><th>Age</th><th>Position</th><th>Spiritual gift</th><th>Registered</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Select</th><th>Photo</th><th>Name</th><th>Category</th><th>Civil status</th><th>Center</th><th>Age</th><th>Position</th><th>Spiritual gift</th><th>Registered</th><th>Actions</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
@@ -114,7 +117,6 @@ td.sel input{width:22px;height:22px;min-height:0;padding:0}
     <label for="e_civil">Civil status</label><select id="e_civil"></select>
     <label for="e_cat">Category</label><select id="e_cat"></select>
     <label for="e_center">Center</label><select id="e_center" required></select>
-    <label for="e_status">Status</label><select id="e_status"></select>
     <label for="e_age">Age</label><input id="e_age" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" required>
     <label for="e_pos">Position</label><input id="e_pos" maxlength="80">
     <label for="e_gift">Spiritual gift</label><input id="e_gift" maxlength="80">
@@ -124,15 +126,20 @@ td.sel input{width:22px;height:22px;min-height:0;padding:0}
     <label class="chk"><input id="e_off" type="checkbox" style="width:auto"> Area 4 Officer</label>
     <div id="e_ofs" hidden>
       <small>The Center above is the assigned center.</small>
+      <fieldset class="lv"><legend>Officer type</legend>
+        <label class="chk"><input id="e_lv_area" type="checkbox" style="width:auto"> Area Officer</label>
+        <label class="chk"><input id="e_lv_local" type="checkbox" style="width:auto"> Local Officer</label>
+        <label class="chk"><input id="e_lv_both" type="checkbox" style="width:auto"> Both</label>
+      </fieldset>
       <label for="e_opos">Officer position</label><select id="e_opos"></select>
       <input id="e_opos_o" maxlength="60" placeholder="Type the position" aria-label="Other position" hidden style="margin-top:6px">
-      <label for="e_ts">Term start</label><input id="e_ts" type="date">
-      <label for="e_te">Term end</label><input id="e_te" type="date">
+      <label for="e_term">Term</label><select id="e_term"></select>
       <label for="e_com">Committee / role</label><input id="e_com" maxlength="120">
     </div>
-    <label for="e_photo">Change photo</label>
+    <label for="e_photo">Photo</label>
+    <img id="e_prev" alt="Current photo" hidden>
     <input id="e_photo" type="file" accept="image/*">
-    <small>Leave empty to keep the current photo. Max 2 MB.</small>
+    <small>Leave empty to keep the current photo. Any size is fine; it is resized automatically.</small>
     <div id="eerr" class="err" role="alert"></div>
     <div class="btns">
       <button id="esave" type="submit">Save changes</button>
@@ -150,24 +157,58 @@ if (!CFG.url || CFG.url.includes("YOUR-")) document.body.insertAdjacentHTML("aft
 const db = supabase.createClient(CFG.url || "https://invalid.invalid", CFG.key || "x");
 const $ = id => document.getElementById(id);
 const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Baro Jerusalem","Pergamo","Patmos","Raniag ti lawag","Galilea","Tesalonica","Galacia","Baro a langit","Getsemani"];
-const STATUSES = ["Student","Working","Not working","Other"];
-const TYPES = {"image/jpeg":"jpg","image/png":"png","image/webp":"webp"};
-const MAX = 2 * 1024 * 1024;
 CENTERS.forEach(c => { $("fc").add(new Option(c, c)); $("e_center").add(new Option(c, c)); });
 const CIVIL = ["Single","Married","Separated","Widow (Woman)","Widower (Man)"];
 const CATS = ["Junior FYS","Senior FYS","Katandaan"];
 const POS = ["President","Vice President","Secretary","Treasurer","Auditor","P.R.O.","Board Member"];
-[["e_status",STATUSES],["e_gender",["Male","Female"]],["e_civil",CIVIL],["e_cat",CATS],["e_opos",POS]].forEach(([id, a]) => { $(id).add(new Option("—", "")); a.forEach(v => $(id).add(new Option(v, v))); });
+[["e_gender",["Male","Female"]],["e_civil",CIVIL],["e_cat",CATS],["e_opos",POS]].forEach(([id, a]) => { $(id).add(new Option("—", "")); a.forEach(v => $(id).add(new Option(v, v))); });
 CATS.forEach(c => $("fcat").add(new Option(c, c))); POS.forEach(c => $("fpos").add(new Option(c, c)));
 $("fpos").add(new Option("Others", "__other"));
 $("e_opos").add(new Option("Others (type below)", "__other"));
 $("e_opos").onchange = () => { $("e_opos_o").hidden = $("e_opos").value !== "__other"; };
 const rank = p => POS.includes(p) ? POS.indexOf(p) : 99;
 $("e_off").onchange = () => { $("e_ofs").hidden = !$("e_off").checked; };
+$("e_lv_both").onchange = () => { $("e_lv_area").checked = $("e_lv_local").checked = $("e_lv_both").checked; };
+$("e_lv_area").onchange = $("e_lv_local").onchange = () => { $("e_lv_both").checked = $("e_lv_area").checked && $("e_lv_local").checked; };
+// Fixed terms (label, start, end). Add a line here for a future term.
+const TERMS = [["2026\u20132028", "2026-01-01", "2028-12-31"]];
+const yr = d => (d || "").slice(0, 4);
+const termLabel = o => o && o.term_start ? yr(o.term_start) + "\u2013" + yr(o.term_end) : "";
+const ended = o => !!(o && o.term_end && o.term_end < new Date().toISOString().slice(0, 10));
+function offType(m){ const s = new Set((m.offs || []).map(o => o.officer_level || "Area")); return s.size > 1 ? "Both" : ([...s][0] || ""); }
+function fillTerms(o){
+  const s = $("e_term"); s.innerHTML = "";
+  TERMS.forEach(([l, a, b]) => s.add(new Option(l, a + "|" + b)));
+  if (o && o.term_start && !TERMS.some(t => t[1] === o.term_start && t[2] === o.term_end)) {   // keep an older/other saved term selectable
+    const v = o.term_start + "|" + (o.term_end || ""); s.add(new Option((termLabel(o) || o.term_start) + " (saved)", v)); s.value = v;
+  }
+}
+const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(36).slice(2);
+function compress(file){ // same as the public forms: ~900px JPEG, so big phone photos always fit
+  return new Promise((res, rej) => {
+    const img = new Image(), u = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(u);
+      const k = Math.min(1, 900 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(b => b ? res(b) : rej(new Error("compress")), "image/jpeg", 0.85); };
+    img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("unreadable")); };
+    img.src = u;
+  });
+}
+let prevUrl = null;
+$("e_photo").addEventListener("change", () => {
+  if (prevUrl) { URL.revokeObjectURL(prevUrl); prevUrl = null; }
+  const f = $("e_photo").files[0], cur = editing && urls[editing.photo_path];
+  if (f) prevUrl = URL.createObjectURL(f);
+  const src = prevUrl || cur || ""; $("e_prev").src = src; $("e_prev").hidden = !src;
+});
 function ageOf(dob){ const d = new Date(dob + "T00:00:00"), n = new Date(); if (!dob || isNaN(d) || d > n) return null;
   let a = n.getFullYear() - d.getFullYear(); if (n.getMonth() < d.getMonth() || (n.getMonth() === d.getMonth() && n.getDate() < d.getDate())) a--; return a; }
+// Age is stored at registration and goes stale, so show it from the birth date when we have one
+const curAge = m => (m.date_of_birth && ageOf(m.date_of_birth) != null) ? ageOf(m.date_of_birth) : m.age;
 // Marriage/widowhood override: a non-Single person under 30 recorded as Katandaan
-function override(m){ return m.civil_status && m.civil_status !== "Single" && m.category === "Katandaan" && m.age != null && m.age < 30
+function override(m){ return m.civil_status && m.civil_status !== "Single" && m.category === "Katandaan" && curAge(m) != null && curAge(m) < 30
   ? `<small class="pill">${m.civil_status === "Married" ? "married override" : "marital status override"}</small>` : ""; }
 let all = [], urls = {}, editing = null;
 
@@ -193,9 +234,10 @@ async function load(){
     }
     all = rows; urls = {};
     [...sel].forEach(id => { if (!all.some(m => m.id === id)) sel.delete(id); });
-    const o = await db.from("area4_officers").select("*");   // per-center officer terms; active term preferred
-    all.forEach(m => m.off = null);
-    (o.data || []).forEach(x => { const m = all.find(y => y.id === x.member_id); if (m && (!m.off || !x.term_end)) m.off = x; });
+    const o = await db.from("area4_officers").select("*").order("term_start", {ascending:false});
+    const byId = {}; all.forEach(m => { m.off = null; m.offs = []; byId[m.id] = m; });
+    (o.data || []).forEach(x => { if (byId[x.member_id]) byId[x.member_id].offs.push(x); });
+    all.forEach(m => m.off = m.offs[0] || null);   // newest term = the one shown in the table/exports
     const paths = all.map(m => m.photo_path).filter(Boolean);
     for (let i = 0; i < paths.length; i += 100) {
       const s = await db.storage.from("member-photos").createSignedUrls(paths.slice(i, i + 100), 3600);
@@ -223,23 +265,23 @@ function render(){
   if (oc) return renderOfficers(list);
   $("rows").innerHTML = list.length ? list.map(m => `<tr>
     <td class="sel" data-label="Select"><input type="checkbox" data-sel="${m.id}" ${sel.has(m.id) ? "checked" : ""} aria-label="Select ${esc(m.full_name)}"></td>
-    <td class="ph">${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img loading="lazy" src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : ""}</td>
+    <td class="ph">${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img loading="lazy" src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : '<span class="nophoto">No photo</span>'}</td>
     <td data-label="Name">${esc(m.full_name)}${m.is_officer ? '<span class="badge">Officer</span>' : ""}</td>
     <td data-label="Category">${esc(m.category)}${override(m)}</td><td data-label="Civil status">${esc(m.civil_status)}</td>
     <td data-label="Center">${esc(m.center)}</td>
-    <td data-label="Status">${esc(m.status)}</td><td data-label="Age">${m.age ?? ""}</td>
+    <td data-label="Age">${curAge(m) ?? ""}</td>
     <td data-label="Position">${esc(posOf(m))}</td><td data-label="Spiritual gift">${esc(giftOf(m))}</td>
     <td data-label="Registered">${new Date(m.created_at).toLocaleDateString()}</td>
     <td class="act"><button type="button" class="plain sm" data-act="edit" data-id="${m.id}">Edit</button>
       <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button></td></tr>`).join("")
-    : '<tr><td colspan="12">No members found.</td></tr>';
+    : '<tr><td colspan="11">No members found.</td></tr>';
 }
 function renderOfficers(list){
   const g = {};
-  list.forEach(m => (g[m.off.center || m.center] = g[m.off.center || m.center] || []).push(m));
+  list.forEach(m => m.offs.forEach(o => { const c = o.center || m.center; (g[c] = g[c] || []).push({m, o}); }));
   const cs = Object.keys(g).sort();
-  $("oc").innerHTML = cs.length ? cs.map(c => `<h2>${esc(c)}</h2><ul>` + g[c].sort((a, b) => rank(a.off.position) - rank(b.off.position))
-    .map(m => `<li><b>${esc(m.off.position)}</b> — ${esc(m.full_name)}${m.off.term_end ? " <small>(term ended)</small>" : ""}</li>`).join("") + "</ul>").join("")
+  $("oc").innerHTML = cs.length ? cs.map(c => `<h2>${esc(c)}</h2><ul>` + g[c].sort((a, b) => rank(a.o.position) - rank(b.o.position) || (a.o.officer_level || "").localeCompare(b.o.officer_level || ""))
+    .map(({m, o}) => `<li><b>${esc(o.position)}</b> — ${esc(m.full_name)} <small>(${esc(o.officer_level || "Area")} officer${termLabel(o) ? ", " + termLabel(o) : ""}${ended(o) ? ", term ended" : ""})</small></li>`).join("") + "</ul>").join("")
     : "<p>No officers found.</p>";
 }
 
@@ -262,58 +304,81 @@ function openEdit(m){
   const p = (m.full_name || "").split(" "), o = m.off || {};
   $("e_first").value = m.first_name ?? p[0] ?? ""; $("e_mid").value = m.middle_name || ""; $("e_last").value = m.last_name ?? p.slice(1).join(" ");
   $("e_dob").value = m.date_of_birth || ""; setSel($("e_gender"), m.gender); setSel($("e_civil"), m.civil_status); setSel($("e_cat"), m.category);
-  setSel($("e_center"), m.center); setSel($("e_status"), m.status);
-  $("e_age").value = m.age ?? ""; $("e_pos").value = posOf(m); $("e_gift").value = m.spiritual_gift || "";
+  setSel($("e_center"), m.center);
+  $("e_age").value = curAge(m) ?? ""; $("e_pos").value = posOf(m); $("e_gift").value = m.spiritual_gift || "";
   $("e_phone").value = m.contact_number || ""; $("e_email").value = m.email || ""; $("e_addr").value = m.address || "";
   $("e_off").checked = !!m.is_officer; $("e_ofs").hidden = !m.is_officer;
-  const custom = o.position && !POS.includes(o.position); setSel($("e_opos"), custom ? "__other" : o.position); $("e_opos_o").value = custom ? o.position : ""; $("e_opos_o").hidden = !custom; $("e_ts").value = o.term_start || ""; $("e_te").value = o.term_end || ""; $("e_com").value = o.committee || "";
+  const custom = o.position && !POS.includes(o.position); setSel($("e_opos"), custom ? "__other" : o.position); $("e_opos_o").value = custom ? o.position : ""; $("e_opos_o").hidden = !custom;
+  const lvs = new Set((m.offs || []).map(x => x.officer_level || "Area"));
+  $("e_lv_area").checked = lvs.has("Area"); $("e_lv_local").checked = lvs.has("Local"); $("e_lv_both").checked = lvs.size > 1;
+  fillTerms(o); $("e_com").value = o.committee || "";
+  if (prevUrl) { URL.revokeObjectURL(prevUrl); prevUrl = null; }
+  $("e_prev").src = urls[m.photo_path] || ""; $("e_prev").hidden = !urls[m.photo_path];
   $("dlg").showModal();
 }
 $("e_age").addEventListener("input", () => { $("e_age").value = $("e_age").value.replace(/\D/g, "").slice(0, 3); });
+$("e_dob").addEventListener("change", () => { const a = ageOf($("e_dob").value); if (a != null) $("e_age").value = a; });
 $("ecancel").onclick = () => $("dlg").close();
 
 $("ef").addEventListener("submit", async e => {
   e.preventDefault(); $("esave").disabled = true; $("eerr").textContent = "";
+  let newPath = null;
   try {
     const dob = $("e_dob").value || null; let ageNum = parseInt($("e_age").value, 10);
     if (dob && ageOf(dob) != null) ageNum = ageOf(dob);
     if (!(ageNum >= 1 && ageNum <= 120)) throw new Error("Please enter a valid age (1 to 120).");
     const first = $("e_first").value.trim(), mid = $("e_mid").value.trim(), last = $("e_last").value.trim();
     if (!first || !last) throw new Error("First and last name are required.");
-    const isOff = $("e_off").checked;
+    const isOff = $("e_off").checked, center = $("e_center").value;
+    const levels = [$("e_lv_area").checked && "Area", $("e_lv_local").checked && "Local"].filter(Boolean);
     const opos = $("e_opos").value === "__other" ? $("e_opos_o").value.trim().replace(/\s+/g, " ") : $("e_opos").value;
-    if (isOff && (!opos || !$("e_ts").value)) throw new Error("Officers need a position and a term start.");
-    // Officer row first, so a per-center uniqueness failure stops the save before anything else changes
-    if (isOff) {
-      const o = {center: $("e_center").value, position: opos, term_start: $("e_ts").value || null, term_end: $("e_te").value || null, committee: $("e_com").value.trim() || null};
-      const r = await (editing.off ? db.from("area4_officers").update(o).eq("id", editing.off.id) : db.from("area4_officers").insert({...o, member_id: editing.id}));
-      if (r.error) throw new Error(r.error.code === "23505" ? "Another active " + o.position + " already exists at " + o.center + "." : r.error.message);
-    } else if (editing.off) {
-      const r = await db.from("area4_officers").delete().eq("member_id", editing.id); if (r.error) throw r.error;
-    }
+    if (isOff && !levels.length) throw new Error("Choose Area Officer, Local Officer or Both.");
+    if (isOff && (!opos || !$("e_term").value)) throw new Error("Officers need a position and a term.");
+    const mine = editing.offs || [];
+    // Upload the new photo first (resized to ~900px JPEG); if anything later fails it is removed again
     let photo_path = editing.photo_path, oldPath = null;
     const file = $("e_photo").files[0];
     if (file) {
-      if (file.size > MAX) throw new Error("Photo is larger than 2 MB.");
-      if (!TYPES[file.type]) throw new Error("Photo must be JPG, PNG or WebP.");
-      const np = ((window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(36).slice(2)) + "." + TYPES[file.type];
-      const up = await db.storage.from("member-photos").upload(np, file, {contentType: file.type});
-      if (up.error) throw up.error;
-      oldPath = editing.photo_path; photo_path = np;
+      let blob; try { blob = await compress(file); } catch (_) { throw new Error("This photo could not be read. Please choose a JPG, PNG or WebP image."); }
+      const np = uid() + ".jpg";
+      const up = await db.storage.from("member-photos").upload(np, blob, {contentType: "image/jpeg"});
+      if (up.error) throw new Error("Photo upload failed: " + up.error.message);
+      newPath = np; oldPath = editing.photo_path; photo_path = np;
+    }
+    // Officer rows (one per level) before the member row, so a duplicate-position error stops the save early
+    if (isOff) {
+      const [ts, te] = $("e_term").value.split("|");
+      const base = {center, position: opos, term_start: ts || null, term_end: te || null, committee: $("e_com").value.trim() || null};
+      for (const lv of levels) {
+        const ex = mine.find(x => (x.officer_level || "Area") === lv);
+        const r = await (ex ? db.from("area4_officers").update({...base, officer_level: lv}).eq("id", ex.id).select()
+                            : db.from("area4_officers").insert({...base, officer_level: lv, member_id: editing.id}).select());
+        if (r.error) throw new Error(r.error.code === "23505" ? "Another " + opos + " is already registered at " + center + " for this term (" + lv + " officer)." : r.error.message);
+        if (!r.data.length) throw new Error("Officer record was not saved (not allowed). Run migration.sql in Supabase.");
+      }
+      const drop = mine.filter(x => !levels.includes(x.officer_level || "Area")).map(x => x.id);
+      if (drop.length) { const r = await db.from("area4_officers").delete().in("id", drop); if (r.error) throw r.error; }
+    } else if (mine.length) {
+      const r = await db.from("area4_officers").delete().eq("member_id", editing.id); if (r.error) throw r.error;
     }
     const r = await db.from("members").update({
       first_name: first, middle_name: mid || null, last_name: last, full_name: [first, mid, last].filter(Boolean).join(" "),
       date_of_birth: dob, gender: $("e_gender").value || null, civil_status: $("e_civil").value || null, category: $("e_cat").value || null,
-      center: $("e_center").value, status: $("e_status").value || null, age: ageNum, is_officer: isOff,
-      position: (isOff && opos) || $("e_pos").value.trim() || "Member",
+      center, age: ageNum, is_officer: isOff,
+      // un-ticking Officer must not leave the old officer title (e.g. "President") in the member record
+      position: isOff ? opos : (editing.is_officer && $("e_pos").value.trim() === posOf(editing) ? "Member" : ($("e_pos").value.trim() || "Member")),
       spiritual_gift: $("e_gift").value.trim() || "None", contact_number: $("e_phone").value.trim() || null,
       email: $("e_email").value.trim() || null, address: $("e_addr").value.trim() || null, photo_path
     }).eq("id", editing.id).select();
-    if (r.error) throw r.error;
+    if (r.error) throw new Error(r.error.code === "23505" ? "Another member with the same name and email already exists." : r.error.message);
     if (!r.data.length) throw new Error("Not allowed. Run add-edit-delete.sql in Supabase.");
+    newPath = null;                                   // saved: keep the new photo
     if (oldPath) await db.storage.from("member-photos").remove([oldPath]);
     $("dlg").close(); await load();
-  } catch (err) { $("eerr").textContent = "Could not save: " + (err.message || err); }
+  } catch (err) {
+    if (newPath) db.storage.from("member-photos").remove([newPath]).catch(() => {});
+    $("eerr").textContent = "Could not save: " + (err.message || err);
+  }
   finally { $("esave").disabled = false; }
 });
 
@@ -335,21 +400,21 @@ function photoNames(){          // member id -> "Center/Full Name.jpg" (unique)
 }
 function csvCell(v){
   v = v == null ? "" : String(v);
-  if (/^[=+\-@]/.test(v)) v = "'" + v;
+  if (/^[=+\-@\t\r]/.test(v)) v = "'" + v;
   return '"' + v.replace(/"/g, '""') + '"';
 }
 function tableData(list, names){
-  const head = ["No.","Full Name","First Name","Middle Name","Last Name","Date of Birth","Gender","Civil Status","Category","Category Note","Officer","Officer Position","Center","Term Start","Term End","Committee","Status","Age","Position","Spiritual Gift","Contact","Email","Address","Date Registered","Photo File"];
+  const head = ["No.","Full Name","First Name","Middle Name","Last Name","Date of Birth","Gender","Civil Status","Category","Category Note","Officer","Officer Position","Officer Type","Center","Term Start","Term End","Committee","Age","Position","Spiritual Gift","Contact","Email","Address","Date Registered","Photo File"];
   const fmt = {year:"numeric", month:"short", day:"2-digit", hour:"numeric", minute:"2-digit"};
   const rows = sorted(list).map((m, i) => { const o = m.off || {}; return [i + 1, m.full_name, m.first_name, m.middle_name, m.last_name, m.date_of_birth, m.gender, m.civil_status, m.category,
-    override(m) ? (m.civil_status === "Married" ? "married override" : "marital status override") : "", m.is_officer ? "Yes" : "No", o.position, m.center, o.term_start, o.term_end, o.committee,
-    m.status, m.age, posOf(m), giftOf(m), m.contact_number, m.email, m.address, new Date(m.created_at).toLocaleString("en-US", fmt), names[m.id] || "No photo"]; });
+    override(m) ? (m.civil_status === "Married" ? "married override" : "marital status override") : "", m.is_officer ? "Yes" : "No", o.position, offType(m), m.center, o.term_start, o.term_end, o.committee,
+    curAge(m), posOf(m), giftOf(m), m.contact_number, m.email, m.address, new Date(m.created_at).toLocaleString("en-US", fmt), names[m.id] || "No photo"]; });
   return [head, ...rows];
 }
 function csvText(list, names){ return "\ufeff" + tableData(list, names).map(r => r.map(csvCell).join(",")).join("\r\n"); }
 // Excel: an HTML table saved as .xls opens natively in Excel/LibreOffice (no external library needed)
 function xlsText(list, names){
-  const cell = v => { v = v == null ? "" : String(v); return "<td>" + esc(/^[=+\-@]/.test(v) ? "'" + v : v) + "</td>"; };
+  const cell = v => { v = v == null ? "" : String(v); return "<td>" + esc(/^[=+\-@\t\r]/.test(v) ? "'" + v : v) + "</td>"; };
   return '<html><head><meta charset="utf-8"></head><body><table border="1">' + tableData(list, names).map(r => "<tr>" + r.map(cell).join("") + "</tr>").join("") + "</table></body></html>";
 }
 function saveBlob(blob, name){

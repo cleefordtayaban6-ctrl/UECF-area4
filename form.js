@@ -126,15 +126,16 @@ function renderCommon(officer) {
   $("civil").onchange = () => { touched = false; refresh(); }; // civil status change re-suggests Katandaan
   document.querySelectorAll("input[name=cat]").forEach(r => r.onchange = () => { touched = true; refresh(); });
   let tipOk = false; // reminder shown every time
-  $("photo").addEventListener("click", e => { if (tipOk) { tipOk = false; return; } e.preventDefault(); $("tip").showModal(); });
+  $("photo").addEventListener("click", e => { if (typeof $("tip").showModal !== "function") return; /* very old phones: skip the reminder, never block the picker */ if (tipOk) { tipOk = false; return; } e.preventDefault(); $("tip").showModal(); });
   $("tipok").onclick = () => { $("tip").close(); tipOk = true; $("photo").click(); };
   $("tipno").onclick = () => $("tip").close();
-  let photoSeq = 0;
+  let photoSeq = 0, prevUrl = null; // preview object URL, revoked when replaced
   // Automatic checks: format, size, portrait/square shape, and (where the browser supports it) face count and size.
   // These catch obvious non-ID photos; the admin can still review every photo.
   $("photo").addEventListener("change", async () => {
     const f = $("photo").files[0], p = $("preview"), st = $("pstat"), seq = ++photoSeq;
     say(""); photoOk = false; p.style.display = "none"; st.textContent = ""; st.className = "pstat";
+    if (prevUrl) { URL.revokeObjectURL(prevUrl); prevUrl = null; }
     if (!f) return;
     const fail = m => { if (seq !== photoSeq) return; $("photo").value = ""; p.style.display = "none"; st.textContent = "\u2717 " + m; st.className = "pstat bad"; };
     if (f.size > 25 * 1024 * 1024 || !/^image\/(jpeg|png|webp)$/.test(f.type)) return fail("Please choose a JPG, PNG or WEBP photo.");
@@ -156,7 +157,7 @@ function renderCommon(officer) {
     }
     if (msg) { URL.revokeObjectURL(url); return fail(msg); }
     if (seq !== photoSeq) return URL.revokeObjectURL(url);
-    p.src = url; p.style.display = "block"; photoOk = true;
+    p.src = url; prevUrl = url; p.style.display = "block"; photoOk = true;
     st.textContent = note || "\u2713 Photo accepted. Please check that it matches the requirements above.";
     st.className = "pstat " + (note ? "warn" : "ok");
   });
@@ -209,7 +210,7 @@ function wireForm(extra, save) {
       say("Uploading…");
       path = uid() + ".jpg";
       const up = await db.storage.from("member-photos").upload(path, blob, { contentType: "image/jpeg" });
-      if (up.error) { path = null; throw up.error; }
+      if (up.error) { console.error(up.error); path = null; throw new Error("FRIENDLY:The photo could not be uploaded. Check your signal and try again, or choose a smaller photo."); }
       c.row.photo_path = path;
       say("Saving…");
       await save(c.row, x);
