@@ -87,6 +87,7 @@ dialog{max-height:92vh;overflow-y:auto}
     <button id="csv" type="button">Download CSV</button>
     <button id="xls" type="button">Download Excel</button>
     <button id="zip" type="button">Download Photos (ZIP)</button>
+    <button id="delall" type="button" class="del">Delete all</button>
     <button id="out" type="button" class="plain">Log out</button>
   </div>
   <div id="oc" hidden></div>
@@ -213,6 +214,7 @@ function filtered(){
 function render(){
   const oc = $("fv").value === "c", list = oc ? filtered().filter(m => m.off) : filtered();
   $("count").textContent = list.length + (oc ? " officer" : " member") + (list.length === 1 ? "" : "s") + (!oc && list.length !== all.length ? " (of " + all.length + " total)" : "");
+  { const n = filtered().length; $("delall").textContent = n === all.length ? "Delete all" : "Delete shown (" + n + ")"; }
   $("tw").hidden = oc; $("oc").hidden = !oc;
   if (oc) return renderOfficers(list);
   $("rows").innerHTML = list.length ? list.map(m => `<tr>
@@ -388,6 +390,33 @@ $("login").addEventListener("submit", async e => {
 });
 $("out").onclick = async () => { await db.auth.signOut(); show(false); };
 $("ref").onclick = load;
+// DELETE ALL / DELETE SHOWN: removes every record in the current (filtered) list plus their photos.
+// Officer rows are removed automatically (ON DELETE CASCADE). Safeguards: confirm + type DELETE + automatic CSV backup.
+$("delall").onclick = async () => {
+  const list = filtered();
+  if (!list.length) return alert("There is nothing to delete.");
+  const scope = list.length === all.length ? "ALL " + all.length + " members" : list.length + " members shown by the current filters (out of " + all.length + " total)";
+  if (!confirm("You are about to PERMANENTLY delete " + scope + " and their photos.\nThis cannot be undone.\n\nA CSV backup will download first. Continue?")) return;
+  if ((prompt("Type DELETE (capital letters) to confirm.") || "").trim() !== "DELETE") return alert("Cancelled. Nothing was deleted.");
+  const btn = $("delall"), label = btn.textContent; btn.disabled = true;
+  let done = 0;
+  try {
+    saveBlob(new Blob([csvText(list, photoNames())], {type:"text/csv;charset=utf-8"}), "backup-before-delete-" + stamp() + ".csv");
+    await new Promise(r => setTimeout(r, 1500));            // let the backup download start
+    const ids = list.map(m => m.id);
+    for (let i = 0; i < ids.length; i += 50) {
+      const r = await db.from("members").delete().in("id", ids.slice(i, i + 50)).select("id,photo_path");
+      if (r.error) throw r.error;
+      const paths = (r.data || []).map(x => x.photo_path).filter(Boolean);
+      if (paths.length) await db.storage.from("member-photos").remove(paths);
+      done += (r.data || []).length; btn.textContent = "Deleting " + done + "/" + ids.length;
+    }
+    alert("Deleted " + done + " member" + (done === 1 ? "" : "s") + ". A backup CSV was downloaded.");
+  } catch (err) {
+    console.error(err);
+    alert("Stopped after deleting " + done + " of " + list.length + ". Check your internet and your admin login, then refresh.");
+  } finally { btn.disabled = false; btn.textContent = label; await load(); }
+};
 ["fc","ft","fcat","fpos","fv"].forEach(id => $(id).onchange = render); $("q").oninput = render;
 $("xls").onclick = () => saveBlob(new Blob([xlsText(filtered(), photoNames())], {type:"application/vnd.ms-excel"}), "members-" + stamp() + ".xls");
 db.auth.getSession().then(r => show(!!r.data.session));
