@@ -119,6 +119,7 @@ dialog{max-height:92vh;overflow-y:auto}
     <div id="e_ofs" hidden>
       <small>The Center above is the assigned center.</small>
       <label for="e_opos">Officer position</label><select id="e_opos"></select>
+      <input id="e_opos_o" maxlength="60" placeholder="Type the position" aria-label="Other position" hidden style="margin-top:6px">
       <label for="e_ts">Term start</label><input id="e_ts" type="date">
       <label for="e_te">Term end</label><input id="e_te" type="date">
       <label for="e_com">Committee / role</label><input id="e_com" maxlength="120">
@@ -152,6 +153,10 @@ const CATS = ["Junior FYS","Senior FYS","Katandaan"];
 const POS = ["President","Vice President","Secretary","Treasurer","Auditor","P.R.O.","Board Member"];
 [["e_status",STATUSES],["e_gender",["Male","Female"]],["e_civil",CIVIL],["e_cat",CATS],["e_opos",POS]].forEach(([id, a]) => { $(id).add(new Option("—", "")); a.forEach(v => $(id).add(new Option(v, v))); });
 CATS.forEach(c => $("fcat").add(new Option(c, c))); POS.forEach(c => $("fpos").add(new Option(c, c)));
+$("fpos").add(new Option("Others", "__other"));
+$("e_opos").add(new Option("Others (type below)", "__other"));
+$("e_opos").onchange = () => { $("e_opos_o").hidden = $("e_opos").value !== "__other"; };
+const rank = p => POS.includes(p) ? POS.indexOf(p) : 99;
 $("e_off").onchange = () => { $("e_ofs").hidden = !$("e_off").checked; };
 function ageOf(dob){ const d = new Date(dob + "T00:00:00"), n = new Date(); if (!dob || isNaN(d) || d > n) return null;
   let a = n.getFullYear() - d.getFullYear(); if (n.getMonth() < d.getMonth() || (n.getMonth() === d.getMonth() && n.getDate() < d.getDate())) a--; return a; }
@@ -200,7 +205,7 @@ async function load(){
 function filtered(){
   const c = $("fc").value, q = $("q").value.trim().toLowerCase(), t = $("ft").value, g = $("fcat").value, p = $("fpos").value;
   return all.filter(m => (!c || m.center === c) && (!q || (m.full_name || "").toLowerCase().includes(q))
-    && (!t || (t === "o") === !!m.is_officer) && (!g || m.category === g) && (!p || (m.off && m.off.position === p)));
+    && (!t || (t === "o") === !!m.is_officer) && (!g || m.category === g) && (!p || (m.off && (p === "__other" ? !POS.includes(m.off.position) : m.off.position === p))));
 }
 
 function render(){
@@ -224,7 +229,7 @@ function renderOfficers(list){
   const g = {};
   list.forEach(m => (g[m.off.center || m.center] = g[m.off.center || m.center] || []).push(m));
   const cs = Object.keys(g).sort();
-  $("oc").innerHTML = cs.length ? cs.map(c => `<h2>${esc(c)}</h2><ul>` + g[c].sort((a, b) => POS.indexOf(a.off.position) - POS.indexOf(b.off.position))
+  $("oc").innerHTML = cs.length ? cs.map(c => `<h2>${esc(c)}</h2><ul>` + g[c].sort((a, b) => rank(a.off.position) - rank(b.off.position))
     .map(m => `<li><b>${esc(m.off.position)}</b> — ${esc(m.full_name)}${m.off.term_end ? " <small>(term ended)</small>" : ""}</li>`).join("") + "</ul>").join("")
     : "<p>No officers found.</p>";
 }
@@ -252,7 +257,7 @@ function openEdit(m){
   $("e_age").value = m.age ?? ""; $("e_pos").value = posOf(m); $("e_gift").value = m.spiritual_gift || "";
   $("e_phone").value = m.contact_number || ""; $("e_email").value = m.email || ""; $("e_addr").value = m.address || "";
   $("e_off").checked = !!m.is_officer; $("e_ofs").hidden = !m.is_officer;
-  setSel($("e_opos"), o.position); $("e_ts").value = o.term_start || ""; $("e_te").value = o.term_end || ""; $("e_com").value = o.committee || "";
+  const custom = o.position && !POS.includes(o.position); setSel($("e_opos"), custom ? "__other" : o.position); $("e_opos_o").value = custom ? o.position : ""; $("e_opos_o").hidden = !custom; $("e_ts").value = o.term_start || ""; $("e_te").value = o.term_end || ""; $("e_com").value = o.committee || "";
   $("dlg").showModal();
 }
 $("e_age").addEventListener("input", () => { $("e_age").value = $("e_age").value.replace(/\D/g, "").slice(0, 3); });
@@ -267,10 +272,11 @@ $("ef").addEventListener("submit", async e => {
     const first = $("e_first").value.trim(), mid = $("e_mid").value.trim(), last = $("e_last").value.trim();
     if (!first || !last) throw new Error("First and last name are required.");
     const isOff = $("e_off").checked;
-    if (isOff && (!$("e_opos").value || !$("e_ts").value)) throw new Error("Officers need a position and a term start.");
+    const opos = $("e_opos").value === "__other" ? $("e_opos_o").value.trim().replace(/\s+/g, " ") : $("e_opos").value;
+    if (isOff && (!opos || !$("e_ts").value)) throw new Error("Officers need a position and a term start.");
     // Officer row first, so a per-center uniqueness failure stops the save before anything else changes
     if (isOff) {
-      const o = {center: $("e_center").value, position: $("e_opos").value, term_start: $("e_ts").value || null, term_end: $("e_te").value || null, committee: $("e_com").value.trim() || null};
+      const o = {center: $("e_center").value, position: opos, term_start: $("e_ts").value || null, term_end: $("e_te").value || null, committee: $("e_com").value.trim() || null};
       const r = await (editing.off ? db.from("area4_officers").update(o).eq("id", editing.off.id) : db.from("area4_officers").insert({...o, member_id: editing.id}));
       if (r.error) throw new Error(r.error.code === "23505" ? "Another active " + o.position + " already exists at " + o.center + "." : r.error.message);
     } else if (editing.off) {
@@ -290,7 +296,7 @@ $("ef").addEventListener("submit", async e => {
       first_name: first, middle_name: mid || null, last_name: last, full_name: [first, mid, last].filter(Boolean).join(" "),
       date_of_birth: dob, gender: $("e_gender").value || null, civil_status: $("e_civil").value || null, category: $("e_cat").value || null,
       center: $("e_center").value, status: $("e_status").value || null, age: ageNum, is_officer: isOff,
-      position: (isOff && $("e_opos").value) || $("e_pos").value.trim() || "Member",
+      position: (isOff && opos) || $("e_pos").value.trim() || "Member",
       spiritual_gift: $("e_gift").value.trim() || "None", contact_number: $("e_phone").value.trim() || null,
       email: $("e_email").value.trim() || null, address: $("e_addr").value.trim() || null, photo_path
     }).eq("id", editing.id).select();

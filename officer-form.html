@@ -14,7 +14,8 @@
     <div id="common"></div>
     <h2 style="font-size:1.2rem;margin:22px 0 0">Officer details</h2>
     <label for="opos">Position *</label>
-    <select id="opos"><option value="">Select…</option><option>President</option><option>Vice President</option><option>Secretary</option><option>Treasurer</option><option>Auditor</option><option>P.R.O.</option><option>Board Member</option></select>
+    <select id="opos"><option value="">Select…</option><option>President</option><option>Vice President</option><option>Secretary</option><option>Treasurer</option><option>Auditor</option><option>P.R.O.</option><option>Board Member</option><option value="__other">Others (type your position)</option></select>
+    <input id="opos_o" maxlength="60" placeholder="Type your position" aria-label="Other position" autocomplete="off" hidden style="margin-top:8px">
     <label for="ts">Term start *</label><input id="ts" type="date">
     <label for="te">Term end (optional)</label><input id="te" type="date">
     <label for="com">Committee / role description (optional)</label><input id="com" maxlength="120">
@@ -27,11 +28,20 @@
 <script src="form.js"></script>
 <script>
 renderCommon(true);
+$("opos").onchange = () => { $("opos_o").hidden = $("opos").value !== "__other"; };
 function extra() {
   if (!$("opos").value) return { err: "Please choose your position." };
+  // Typed position: tidy spacing; if it matches a listed position, use the listed spelling (keeps per-center uniqueness reliable)
+  let pos = $("opos").value;
+  if (pos === "__other") {
+    pos = $("opos_o").value.trim().replace(/\s+/g, " ");
+    if (pos.length < 2) return { err: "Please type your position." };
+    const listed = [...$("opos").options].map(o => o.text).find(t => t.toLowerCase() === pos.toLowerCase());
+    if (listed) pos = listed;
+  }
   if (!$("ts").value) return { err: "Please enter your term start date." };
   if ($("te").value && $("te").value < $("ts").value) return { err: "Term end cannot be before term start." };
-  return { o_position: $("opos").value, term_start: $("ts").value, term_end: $("te").value || null, committee: $("com").value.trim() || null };
+  return { o_position: pos, term_start: $("ts").value, term_end: $("te").value || null, committee: $("com").value.trim() || null };
 }
 // Dual registration runs inside ONE database transaction (register_officer in migration.sql):
 // members insert/update + area4_officers insert succeed together or roll back together.

@@ -99,9 +99,9 @@ function renderCommon(officer) {
   <select id="center"><option value="">Select…</option>${CENTERS.map(c => `<option>${c}</option>`).join("")}</select>
   ${officer ? '<small>Each center has its own officers. Select the center where you serve.</small>' : ""}
   <label for="gift">Spiritual gift (optional)</label><input id="gift" maxlength="80" autocomplete="off">
-  <label for="contact">Contact number (optional)</label><input id="contact" type="tel" maxlength="20" autocomplete="tel">
-  <label for="email">Email (optional)</label><input id="email" type="email" maxlength="120" autocomplete="email">
-  <label for="address">Address (optional)</label><input id="address" maxlength="200" autocomplete="street-address">
+  <label for="contact">Contact number (optional)</label><input id="contact" type="tel" maxlength="20" autocomplete="off">
+  <label for="email">Email (optional)</label><input id="email" type="email" maxlength="120" autocomplete="off">
+  <label for="address">Address (optional)</label><input id="address" maxlength="200" autocomplete="off">
   <label for="photo">Profile photo *</label>
   <input id="photo" type="file" accept="image/jpeg,image/png,image/webp">
   <small>Required. A clear 1x1 or passport-size photo; the whole face must be visible.</small><br>
