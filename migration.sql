@@ -117,3 +117,7 @@ exception when unique_violation then
 end $$;
 
 grant execute on function public.register_officer(jsonb) to anon, authenticated;
+
+-- 6) Spelling fix: "Getsimani" -> "Getsemani" (also corrects any rows already saved with the old spelling)
+update public.members set center = 'Getsemani' where center = 'Getsimani';
+update public.area4_officers set center = 'Getsemani' where center = 'Getsimani';

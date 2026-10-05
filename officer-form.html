@@ -17,8 +17,8 @@
     <select id="opos"><option value="">Select…</option><option>President</option><option>Vice President</option><option>Secretary</option><option>Treasurer</option><option>Auditor</option><option>P.R.O.</option><option>Board Member</option><option value="__other">Others (type your position)</option></select>
     <input id="opos_o" maxlength="60" placeholder="Type your position" aria-label="Other position" autocomplete="off" hidden style="margin-top:8px">
     <label for="ts">Term start *</label><input id="ts" type="date">
-    <label for="te">Term end (optional)</label><input id="te" type="date">
-    <label for="com">Committee / role description (optional)</label><input id="com" maxlength="120">
+    <label for="te">Term end (optional)</label><input id="te" type="date"><small class="skip">Optional: you can skip this if you don't want to fill it in.</small>
+    <label for="com">Committee / role description (optional)</label><input id="com" maxlength="120"><small class="skip">Optional: you can skip this if you don't want to fill it in.</small>
     <button id="btn" type="submit">Submit</button>
     <div id="msg" role="status" aria-live="polite"></div>
   </form>

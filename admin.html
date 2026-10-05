@@ -143,7 +143,7 @@ const CFG = window.APP_CONFIG || {};
 if (!CFG.url || CFG.url.includes("YOUR-")) document.body.insertAdjacentHTML("afterbegin", '<p style="padding:12px;color:#b3261e;font-weight:bold">Setup incomplete: open config.js and paste your Supabase URL and key.</p>');
 const db = supabase.createClient(CFG.url || "https://invalid.invalid", CFG.key || "x");
 const $ = id => document.getElementById(id);
-const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Baro Jerusalem","Pergamo","Patmos","Raniag ti lawag","Galilea","Tesalonica","Galacia","Baro a langit","Getsimani"];
+const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Baro Jerusalem","Pergamo","Patmos","Raniag ti lawag","Galilea","Tesalonica","Galacia","Baro a langit","Getsemani"];
 const STATUSES = ["Student","Working","Not working","Other"];
 const TYPES = {"image/jpeg":"jpg","image/png":"png","image/webp":"webp"};
 const MAX = 2 * 1024 * 1024;

@@ -21,3 +21,4 @@ img#preview{display:none;width:160px;height:160px;object-fit:cover;margin-top:8p
 dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:min(420px,92vw);padding:18px}
 dialog::backdrop{background:rgba(0,0,0,.5)}
 .hp{position:absolute;left:-9999px;height:0;overflow:hidden}
+.skip{display:block;margin-top:4px}

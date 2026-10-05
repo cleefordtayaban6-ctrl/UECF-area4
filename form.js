@@ -1,7 +1,8 @@
 // Shared by member-form.html and officer-form.html
 const $ = id => document.getElementById(id);
 const CFG = window.APP_CONFIG || {};
-const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Baro Jerusalem","Pergamo","Patmos","Raniag ti lawag","Galilea","Tesalonica","Galacia","Baro a langit","Getsimani"];
+const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Baro Jerusalem","Pergamo","Patmos","Raniag ti lawag","Galilea","Tesalonica","Galacia","Baro a langit","Getsemani"];
+const SKIP = "Optional: you can skip this if you don't want to fill it in.";
 const CIVIL = ["Single","Married","Separated","Widow (Woman)","Widower (Man)"];
 const CATS = [["Junior FYS","Junior FYS (ages 7–12)"],["Senior FYS","Senior FYS (ages 13–30)"],["Katandaan","Katandaan / Elders (30+, or any married, separated or widowed person)"]];
 const say = (t, c) => { $("msg").textContent = t; $("msg").className = c || ""; };
@@ -87,7 +88,7 @@ function renderCommon(officer) {
   <label for="first">First name *</label><input id="first" maxlength="60" autocomplete="given-name">
   <label for="middle">Middle name *</label><input id="middle" maxlength="60" autocomplete="additional-name">
   <label for="last">Last name *</label><input id="last" maxlength="60" autocomplete="family-name">
-  <label for="suffix">Suffix (optional)</label><input id="suffix" maxlength="10" placeholder="Jr., Sr., III">
+  <label for="suffix">Suffix (optional)</label><input id="suffix" maxlength="10" placeholder="Jr., Sr., III"><small class="skip">${SKIP}</small>
   <label for="dob">Date of birth *</label><input id="dob" type="date">
   <label for="gender">Gender *</label><select id="gender"><option value="">Select…</option><option>Male</option><option>Female</option></select>
   <label for="civil">Civil status *</label><select id="civil"><option value="">Select…</option>${CIVIL.map(c => `<option>${c}</option>`).join("")}</select>
@@ -98,10 +99,10 @@ function renderCommon(officer) {
   <label for="center">${officer ? "Assigned center *" : "Center *"}</label>
   <select id="center"><option value="">Select…</option>${CENTERS.map(c => `<option>${c}</option>`).join("")}</select>
   ${officer ? '<small>Each center has its own officers. Select the center where you serve.</small>' : ""}
-  <label for="gift">Spiritual gift (optional)</label><input id="gift" maxlength="80" autocomplete="off">
-  <label for="contact">Contact number (optional)</label><input id="contact" type="tel" maxlength="20" autocomplete="off">
-  <label for="email">Email (optional)</label><input id="email" type="email" maxlength="120" autocomplete="off">
-  <label for="address">Address (optional)</label><input id="address" maxlength="200" autocomplete="off">
+  <label for="gift">Spiritual gift (optional)</label><input id="gift" maxlength="80" autocomplete="off"><small class="skip">${SKIP}</small>
+  <label for="contact">Contact number (optional)</label><input id="contact" type="tel" maxlength="20" autocomplete="off"><small class="skip">${SKIP}</small>
+  <label for="email">Email (optional)</label><input id="email" type="email" maxlength="120" autocomplete="off"><small class="skip">${SKIP}</small>
+  <label for="address">Address (optional)</label><input id="address" maxlength="200" autocomplete="off"><small class="skip">${SKIP}</small>
   <label for="photo">Profile photo *</label>
   <input id="photo" type="file" accept="image/jpeg,image/png,image/webp">
   <small>Required. A clear 1x1 or passport-size photo; the whole face must be visible.</small><br>
