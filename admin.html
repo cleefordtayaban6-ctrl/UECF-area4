@@ -58,6 +58,7 @@ dialog{max-height:92vh;overflow-y:auto}
 .pill{border:1px solid var(--line);border-radius:99px;padding:1px 8px;margin-left:6px;color:var(--mute)}
 #oc{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:4px 16px 12px}
 #oc h2{font-size:1.15rem;margin:14px 0 4px}#oc ul{margin:0;padding-left:18px}
+.chk{display:flex;gap:8px;align-items:center;font-weight:normal;cursor:pointer}
 </style>
 </head>
 <body>
@@ -67,6 +68,7 @@ dialog{max-height:92vh;overflow-y:auto}
 <form id="login">
   <input id="email" type="email" placeholder="Admin email" required autocomplete="username">
   <input id="pass" type="password" placeholder="Password" required autocomplete="current-password">
+  <label class="chk"><input id="showpw" type="checkbox" style="width:auto;min-height:0"> Show password</label>
   <button type="submit">Log in</button>
   <div id="lerr" class="err"></div>
 </form>
@@ -376,7 +378,9 @@ $("zip").onclick = async () => {
   finally { btn.disabled = false; btn.textContent = label; }
 };
 
-function show(signedIn){ $("login").hidden = signedIn; $("panel").hidden = !signedIn; if (signedIn) load(); }
+$("showpw").onchange = () => { $("pass").type = $("showpw").checked ? "text" : "password"; };
+function show(signedIn){ if (!signedIn) { $("showpw").checked = false; $("pass").type = "password"; $("pass").value = ""; }
+  $("login").hidden = signedIn; $("panel").hidden = !signedIn; if (signedIn) load(); }
 $("login").addEventListener("submit", async e => {
   e.preventDefault(); $("lerr").textContent = "";
   const r = await db.auth.signInWithPassword({email:$("email").value, password:$("pass").value});
