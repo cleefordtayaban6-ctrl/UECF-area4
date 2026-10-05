@@ -86,12 +86,13 @@ fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bo
     <select id="fpos"><option value="">All positions</option></select>
     <select id="fv"><option value="t">Table view</option><option value="c">Officers by Center</option></select>
     <input id="q" type="search" placeholder="Search name…">
-    <span id="count"></span>
+    <span id="count"></span><span id="newn" class="badge" hidden></span>
     <span class="sp"></span>
     <button id="ref" type="button" class="plain">Refresh</button>
     <button id="csv" type="button">Download CSV</button>
     <button id="xls" type="button">Download Excel</button>
     <button id="zip" type="button">Download Photos (ZIP)</button>
+    <button id="blist" type="button" class="plain">Blocked list</button>
     <button id="selbtn" type="button" class="plain">Select all shown</button>
     <button id="delsel" type="button" class="del" hidden>Delete selected (0)</button>
     <button id="delall" type="button" class="del">Delete all</button>
@@ -120,7 +121,7 @@ fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bo
     <label for="e_center">Center</label><select id="e_center" required></select>
     <label for="e_age">Age</label><input id="e_age" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" required>
     <label for="e_pos">Position</label><input id="e_pos" maxlength="80">
-    <label for="e_gift">Spiritual gift</label><input id="e_gift" maxlength="80">
+    <label for="e_gift">Spiritual gift</label><select id="e_gift"></select>
     <label for="e_phone">Contact number</label><input id="e_phone" maxlength="20">
     <label for="e_email">Email</label><input id="e_email" type="email" maxlength="120">
     <label for="e_addr">Address</label><input id="e_addr" maxlength="200">
@@ -147,6 +148,13 @@ fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bo
   </form>
 </dialog>
 
+<dialog id="bdlg">
+  <h2 style="margin:0 0 8px;font-size:1.2rem">Blocked people</h2>
+  <p><small>These people cannot register. Matching uses the same full name and birth date.</small></p>
+  <div id="bbody"></div>
+  <div class="btns"><button type="button" id="bclose" class="plain">Close</button></div>
+</dialog>
+
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -159,8 +167,10 @@ const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Bar
 CENTERS.forEach(c => { $("fc").add(new Option(c, c)); $("e_center").add(new Option(c, c)); });
 const CIVIL = ["Single","Married","Separated","Widow (Woman)","Widower (Man)"];
 const CATS = ["Junior FYS","Senior FYS","Katandaan"];
+const GIFTS = ["Medium","Perlante/Saksi","Evangelista","Vidente","Corandera","Corandero","Angeles ti Daga (kumakanta/cantora)"];
 const POS = ["President","Vice President","Secretary","Treasurer","Auditor","P.R.O.","Board Member"];
 [["e_gender",["Male","Female"]],["e_civil",CIVIL],["e_cat",CATS]].forEach(([id, a]) => { $(id).add(new Option("—", "")); a.forEach(v => $(id).add(new Option(v, v))); });
+$("e_gift").add(new Option("None / skip", "")); GIFTS.forEach(g => $("e_gift").add(new Option(g, g)));
 CATS.forEach(c => $("fcat").add(new Option(c, c))); POS.forEach(c => $("fpos").add(new Option(c, c)));
 $("fpos").add(new Option("Others", "__other"));
 // One position block per officer type: the roles can differ (e.g. Local President, Area Secretary)
@@ -217,6 +227,10 @@ const curAge = m => (m.date_of_birth && ageOf(m.date_of_birth) != null) ? ageOf(
 function override(m){ return m.civil_status && m.civil_status !== "Single" && m.category === "Katandaan" && curAge(m) != null && curAge(m) < 30
   ? `<small class="pill">${m.civil_status === "Married" ? "married override" : "marital status override"}</small>` : ""; }
 let all = [], urls = {}, editing = null;
+// "New" = registered since the last time this phone opened the admin page (kept in this browser only)
+let seenAt = 0, lastLoad = 0;
+try { seenAt = +localStorage.getItem("adminSeenAt") || 0; } catch (_) {}
+const isNew = m => seenAt && new Date(m.created_at).getTime() > seenAt;
 
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function setSel(sel, val){
@@ -249,6 +263,8 @@ async function load(){
       const s = await db.storage.from("member-photos").createSignedUrls(paths.slice(i, i + 100), 3600);
       (s.data || []).forEach(x => { if (x.signedUrl) urls[x.path] = x.signedUrl; });
     }
+    lastLoad = Date.now();
+    try { localStorage.setItem("adminSeenAt", String(Date.now())); } catch (_) {}
     render();
   } catch (err) {
     console.error(err);
@@ -266,20 +282,22 @@ function filtered(){
 function render(){
   const oc = $("fv").value === "c", list = oc ? filtered().filter(m => m.off) : filtered();
   $("count").textContent = list.length + (oc ? " officer" : " member") + (list.length === 1 ? "" : "s") + (!oc && list.length !== all.length ? " (of " + all.length + " total)" : "");
+  { const nn = all.filter(isNew).length; $("newn").hidden = !nn; $("newn").textContent = nn + " new"; }
   { const n = filtered().length; $("delall").textContent = n === all.length ? "Delete all" : "Delete shown (" + n + ")"; } updSel();
   $("tw").hidden = oc; $("oc").hidden = !oc;
   if (oc) return renderOfficers(list);
   $("rows").innerHTML = list.length ? list.map(m => `<tr>
     <td class="sel" data-label="Select"><input type="checkbox" data-sel="${m.id}" ${sel.has(m.id) ? "checked" : ""} aria-label="Select ${esc(m.full_name)}"></td>
     <td class="ph">${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img loading="lazy" src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : '<span class="nophoto">No photo</span>'}</td>
-    <td data-label="Name">${esc(m.full_name)}${m.is_officer ? '<span class="badge">Officer</span>' : ""}</td>
+    <td data-label="Name">${esc(m.full_name)}${isNew(m) ? '<span class="badge" style="background:var(--err);color:#fff">New</span>' : ""}${m.is_officer ? '<span class="badge">Officer</span>' : ""}</td>
     <td data-label="Category">${esc(m.category)}${override(m)}</td><td data-label="Civil status">${esc(m.civil_status)}</td>
     <td data-label="Center">${esc(m.center)}</td>
     <td data-label="Age">${curAge(m) ?? ""}</td>
     <td data-label="Position">${esc(posOf(m))}</td><td data-label="Spiritual gift">${esc(giftOf(m))}</td>
     <td data-label="Registered">${new Date(m.created_at).toLocaleDateString()}</td>
     <td class="act"><button type="button" class="plain sm" data-act="edit" data-id="${m.id}">Edit</button>
-      <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button></td></tr>`).join("")
+      <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button>
+      <button type="button" class="plain sm" data-act="block" data-id="${m.id}">Block</button></td></tr>`).join("")
     : '<tr><td colspan="11">No members found.</td></tr>';
 }
 function renderOfficers(list){
@@ -294,13 +312,13 @@ function renderOfficers(list){
 $("rows").addEventListener("click", e => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
   const m = all.find(x => x.id === b.dataset.id); if (!m) return;
-  if (b.dataset.act === "edit") openEdit(m); else removeMember(m);
+  if (b.dataset.act === "edit") openEdit(m); else if (b.dataset.act === "block") blockMember(m); else removeMember(m);
 });
 
 async function removeMember(m){
   if (!confirm("Delete " + m.full_name + "?\nThis also removes the photo and cannot be undone.")) return;
   const r = await db.from("members").delete().eq("id", m.id).select();
-  if (r.error || !r.data.length) { alert("Could not delete: " + (r.error ? r.error.message : "not allowed. Run add-edit-delete.sql in Supabase.")); return; }
+  if (r.error || !r.data.length) { alert("Could not delete: " + (r.error ? r.error.message : "not allowed. Check the admin policies in Supabase (migration.sql).")); return; }
   if (m.photo_path) await db.storage.from("member-photos").remove([m.photo_path]);
   await load();
 }
@@ -311,7 +329,7 @@ function openEdit(m){
   $("e_first").value = m.first_name ?? p[0] ?? ""; $("e_mid").value = m.middle_name || ""; $("e_last").value = m.last_name ?? p.slice(1).join(" ");
   $("e_dob").value = m.date_of_birth || ""; setSel($("e_gender"), m.gender); setSel($("e_civil"), m.civil_status); setSel($("e_cat"), m.category);
   setSel($("e_center"), m.center);
-  $("e_age").value = curAge(m) ?? ""; $("e_pos").value = posOf(m); $("e_gift").value = m.spiritual_gift || "";
+  $("e_age").value = curAge(m) ?? ""; $("e_pos").value = posOf(m); setSel($("e_gift"), m.spiritual_gift && m.spiritual_gift.trim().toLowerCase() !== "none" ? m.spiritual_gift : ""); // an older typed gift stays selectable
   $("e_phone").value = m.contact_number || ""; $("e_email").value = m.email || ""; $("e_addr").value = m.address || "";
   $("e_off").checked = !!m.is_officer; $("e_ofs").hidden = !m.is_officer;
   LV.forEach(([k]) => { const r = (m.offs || []).find(x => (x.officer_level || "Area") === k) || {}, c = r.position && !POS.includes(r.position);
@@ -380,11 +398,11 @@ $("ef").addEventListener("submit", async e => {
       center, age: ageNum, is_officer: isOff,
       // un-ticking Officer must not leave the old officer title (e.g. "President") in the member record
       position: isOff ? memberPos : (editing.is_officer && $("e_pos").value.trim() === posOf(editing) ? "Member" : ($("e_pos").value.trim() || "Member")),
-      spiritual_gift: $("e_gift").value.trim() || "None", contact_number: $("e_phone").value.trim() || null,
+      spiritual_gift: $("e_gift").value || "None", contact_number: $("e_phone").value.trim() || null,
       email: $("e_email").value.trim() || null, address: $("e_addr").value.trim() || null, photo_path
     }).eq("id", editing.id).select();
     if (r.error) throw new Error(r.error.code === "23505" ? "Another member with the same name and email already exists." : r.error.message);
-    if (!r.data.length) throw new Error("Not allowed. Run add-edit-delete.sql in Supabase.");
+    if (!r.data.length) throw new Error("Not allowed. Check the admin policies in Supabase (migration.sql).");
     newPath = null;                                   // saved: keep the new photo
     if (oldPath) await db.storage.from("member-photos").remove([oldPath]);
     $("dlg").close(); await load();
@@ -463,6 +481,40 @@ $("zip").onclick = async () => {
   finally { btn.disabled = false; btn.textContent = label; }
 };
 
+/*BLOCK*/
+// BLOCKLIST (part of migration.sql). Matches the same full name + birth date, so a parent's other children are never blocked.
+async function blockMember(m){
+  const noDob = !m.date_of_birth;
+  const why = prompt("Block " + m.full_name + " from registering again?\nOptional reason (only you can see it). Press Cancel to stop." +
+    (noDob ? "\n\nWARNING: no birth date is on file, so ANYONE with exactly this name will be blocked." : ""), "");
+  if (why === null) return;
+  const r = await db.from("blocked_registrants").insert({ full_name: m.full_name, date_of_birth: m.date_of_birth || null, reason: why.trim() || null });
+  if (r.error && r.error.code !== "23505") return alert("Could not block: " + (/relation|does not exist|schema cache/i.test(r.error.message) ? "run migration.sql in Supabase first." : r.error.message));
+  if (confirm(m.full_name + " is now blocked.\n\nAlso delete their existing registration and photo?")) {
+    const d = await db.from("members").delete().eq("id", m.id).select("photo_path");
+    if (d.error || !d.data.length) alert("Blocked, but the registration could not be deleted: " + (d.error ? d.error.message : "not allowed."));
+    else if (m.photo_path) await db.storage.from("member-photos").remove([m.photo_path]);
+    await load();
+  }
+}
+async function openBlocked(){
+  $("bbody").textContent = "Loading…"; $("bdlg").showModal();
+  const r = await db.from("blocked_registrants").select("*").order("created_at", {ascending:false});
+  if (r.error) { $("bbody").innerHTML = '<p class="err">' + esc(/relation|does not exist|schema cache/i.test(r.error.message) ? "Run migration.sql in Supabase first." : r.error.message) + "</p>"; return; }
+  $("bbody").innerHTML = r.data.length ? r.data.map(b => `<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0">
+    <div><b>${esc(b.full_name)}</b><br><small>${b.date_of_birth ? "Born " + esc(b.date_of_birth) : "Any birth date (name only)"}${b.reason ? " · " + esc(b.reason) : ""}</small></div>
+    <button type="button" class="plain sm" data-unblock="${b.id}">Unblock</button></div>`).join("") : "<p>No one is blocked.</p>";
+}
+$("blist").onclick = openBlocked;
+$("bclose").onclick = () => $("bdlg").close();
+$("bbody").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-unblock]"); if (!b) return;
+  if (!confirm("Unblock this person? They will be able to register again.")) return;
+  const r = await db.from("blocked_registrants").delete().eq("id", b.dataset.unblock);
+  if (r.error) return alert("Could not unblock: " + r.error.message);
+  openBlocked();
+});
+
 $("showpw").onchange = () => { $("pass").type = $("showpw").checked ? "text" : "password"; };
 function show(signedIn){ if (!signedIn) { $("showpw").checked = false; $("pass").type = "password"; $("pass").value = ""; }
   $("login").hidden = signedIn; $("panel").hidden = !signedIn; if (signedIn) load(); }
@@ -521,6 +573,8 @@ $("delsel").onclick = () => {
 };
 ["fc","ft","fcat","fpos","fv"].forEach(id => $(id).onchange = render); $("q").oninput = render;
 $("xls").onclick = () => saveBlob(new Blob([xlsText(filtered(), photoNames())], {type:"application/vnd.ms-excel"}), "members-" + stamp() + ".xls");
+// Opening the page again on a phone (switching back to the tab) refreshes the list automatically
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("panel").hidden && Date.now() - lastLoad > 30000) load(); });
 db.auth.getSession().then(r => show(!!r.data.session));
 </script>
 </body>

@@ -5,6 +5,7 @@ const CENTERS = ["Puon ti Biag","Damasco","Ti libro a naselloan","Eufrates","Bar
 const SKIP = "Optional: you can skip this if you don't want to fill it in.";
 const CIVIL = ["Single","Married","Separated","Widow (Woman)","Widower (Man)"];
 const CATS = [["Junior FYS","Junior FYS (ages 7–12)"],["Senior FYS","Senior FYS (ages 13–30)"],["Katandaan","Katandaan / Elders (30+, or any married, separated or widowed person)"]];
+const GIFTS = ["Medium","Perlante/Saksi","Evangelista","Vidente","Corandera","Corandero","Angeles ti Daga (kumakanta/cantora)"];
 const say = (t, c) => { $("msg").textContent = t; $("msg").className = c || ""; };
 let db = null;
 if (!CFG.url || CFG.url.includes("YOUR-")) say("Setup incomplete: the admin must fill in config.js.", "err");
@@ -47,6 +48,7 @@ function friendly(err) {
   const m = (err && err.message) || "";
   if (m.startsWith("FRIENDLY:")) return m.slice(9);
   if ((err && err.name === "AbortError") || /abort/i.test(m)) return "Your connection is slow. Please check your signal and try again.";
+  if (/BLOCKED/.test(m)) return "We are not able to accept this registration. Please contact the admin.";
   if (/DUPLICATE_EMAIL|members_email_name_uidx/.test(m) || (err && err.code === "23505")) return "This person is already registered (same name and email).";
   if (!navigator.onLine || /fetch|network/i.test(m)) return "No internet connection. Check your signal and try again.";
   return "Something went wrong. Please try again, or tell the admin.";
@@ -64,6 +66,53 @@ function compress(file) { // ~900px JPEG
     img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("unreadable")); };
     img.src = u;
   });
+}
+
+/*A*/
+// Looks only at colours and edges. It cannot truly recognise an ID card or a hand, so it is a guard, not a judge:
+// it catches the obvious cases (skin/wood at the edges, printed text in the lower part, busy backgrounds, very dark photos).
+function analyzePixels(d, w, h) {
+  const n = w * h, lum = new Float32Array(n), skin = new Uint8Array(n); let sum = 0;
+  for (let i = 0, p = 0; i < n; i++, p += 4) {
+    const r = d[p], g = d[p + 1], b = d[p + 2], y = .299 * r + .587 * g + .114 * b;
+    lum[i] = y; sum += y;
+    const cb = 128 - .168736 * r - .331264 * g + .5 * b, cr = 128 + .5 * r - .418688 * g - .081312 * b;
+    skin[i] = (y > 40 && cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173) ? 1 : 0;
+  }
+  const bx = Math.round(w * .12), by = Math.round(h * .10), ty0 = Math.round(h * .62);
+  let bN = 0, bSkin = 0, bStrong = 0, tN = 0, tStrong = 0;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x, strong = (Math.abs(lum[i + 1] - lum[i - 1]) + Math.abs(lum[i + w] - lum[i - w])) > 50 ? 1 : 0;
+    if (x < bx || x >= w - bx || y < by) { bN++; bSkin += skin[i]; bStrong += strong; }       // left, right and top edges
+    else if (y >= ty0) { tN++; tStrong += strong; }                                           // lower middle, where an ID card has its text
+  }
+  return { bright: sum / n, skinEdge: bN ? bSkin / bN : 0, busy: bN ? bStrong / bN : 0, text: tN ? tStrong / tN : 0 };
+}
+// Two levels so a good photo is never stopped by a guess: clear cases are rejected, borderline cases only warn.
+function lookProblem(a) {
+  const M = {
+    dark: "This photo is too dark. Take it again in good light.",
+    skin: "Skin-coloured or wooden areas touch the edges of the photo (a hand, a table, or a face cropped too tight). Take a new photo of your face against a plain wall, with space around your head.",
+    text: "This looks like a photo of an ID card or a printed picture. Please take a new photo of yourself, not a photo of a photo.",
+    busy: "The background is too busy. Stand in front of a plain, light wall." };
+  if (a.bright < 35) return { block: M.dark };
+  if (a.skinEdge > 0.45) return { block: M.skin };
+  if (a.text > 0.35) return { block: M.text };
+  if (a.busy > 0.20) return { block: M.busy };
+  if (a.bright < 45) return { warn: M.dark };
+  if (a.skinEdge > 0.30) return { warn: M.skin };
+  if (a.text > 0.22) return { warn: M.text };
+  if (a.busy > 0.12) return { warn: M.busy };
+  return null;
+}
+/*B*/
+function lookCheck(img) {
+  try {
+    const s = Math.min(1, 200 / Math.max(img.naturalWidth, img.naturalHeight)), w = Math.max(20, Math.round(img.naturalWidth * s)), h = Math.max(20, Math.round(img.naturalHeight * s));
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(img, 0, 0, w, h);
+    return lookProblem(analyzePixels(x.getImageData(0, 0, w, h).data, w, h));
+  } catch (_) { return null; } // could not analyse: do not block the person
 }
 
 let photoOk = false; // true only after the chosen photo passes the ID-style checks
@@ -100,7 +149,7 @@ function renderCommon(officer) {
   <label for="center">${officer ? "Assigned center *" : "Center *"}</label>
   <select id="center"><option value="">Select…</option>${CENTERS.map(c => `<option>${c}</option>`).join("")}</select>
   ${officer ? '<small>Each center has its own officers. Select the center where you serve.</small>' : ""}
-  <label for="gift">Spiritual gift (optional)</label><input id="gift" maxlength="80" autocomplete="off"><small class="skip">${SKIP}</small>
+  <label for="gift">Spiritual gift (optional)</label><select id="gift"><option value="">None / skip</option>${GIFTS.map(g => `<option>${g}</option>`).join("")}</select><small class="skip">${SKIP}</small>
   <label for="contact">Contact number (optional)</label><input id="contact" type="tel" maxlength="20" autocomplete="off"><small class="skip">${SKIP}</small>
   <label for="email">Email (optional)</label><input id="email" type="email" maxlength="120" autocomplete="off"><small class="skip">${SKIP}</small>
   <label for="address">Address *</label><input id="address" maxlength="200" autocomplete="off">
@@ -110,7 +159,7 @@ function renderCommon(officer) {
       <figure><svg viewBox="0 0 90 110" width="90" height="110" role="img" aria-label="Accepted: head and shoulders on a plain background"><rect width="90" height="110" rx="6" style="fill:var(--bg);stroke:var(--line)"/><circle cx="45" cy="42" r="19" style="fill:var(--mute)"/><path d="M12 110c2-26 17-38 33-38s31 12 33 38z" style="fill:var(--mute)"/></svg><figcaption class="ok">&#10003; Accepted</figcaption></figure>
       <figure><svg viewBox="0 0 90 110" width="90" height="110" role="img" aria-label="Not accepted: casual, wide or full-body photo with a busy background"><rect width="90" height="110" rx="6" style="fill:var(--bg);stroke:var(--line)"/><path d="M0 72l20-25 15 15 18-30 37 40v38H0z" style="fill:var(--line)"/><circle cx="62" cy="62" r="7" style="fill:var(--mute)"/><path d="M50 110c1-14 6-22 12-22s11 8 12 22z" style="fill:var(--mute)"/><path d="M10 10L80 100" style="stroke:var(--err);stroke-width:4"/></svg><figcaption class="bad">&#10007; Not accepted</figcaption></figure>
     </div>
-    <ul class="req"><li>Plain, light background</li><li>Head and shoulders, facing the camera</li><li>Whole face clear, well lit, no filters</li><li>Only you in the photo; no hat or sunglasses</li></ul>
+    <ul class="req"><li>Plain, light background</li><li>Head and shoulders, facing the camera</li><li>Whole face clear, well lit, no filters</li><li>Only you in the photo; no hat or sunglasses</li><li>A photo of yourself, not of an ID card or printed picture; no hands or table in view</li></ul>
     <input id="photo" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose ID-style photo">
     <div id="pstat" class="pstat" role="status" aria-live="polite"></div>
     <img id="preview" alt="Photo preview">
@@ -118,9 +167,9 @@ function renderCommon(officer) {
   </fieldset>
   <dialog id="tip"><h2 style="margin:0 0 8px;font-size:1.2rem">ID-style photo only</h2>
     <p>Choose a photo like a <b>school ID or passport picture</b>: plain background, head and shoulders, facing the camera, whole face clear.</p>
-    <p><b>Not accepted:</b> casual or Facebook-style poses, selfies with filters, group or full-body shots, sunglasses or hats.</p>
+    <p><b>Not accepted:</b> casual or Facebook-style poses, selfies with filters, group or full-body shots, sunglasses or hats, photos of ID cards or printed pictures.</p>
     <button id="tipok" type="button">I understand, choose photo</button><button id="tipno" type="button" class="plain">Cancel</button></dialog>
-  <div class="hp" aria-hidden="true"><label>Website <input id="website" tabindex="-1" autocomplete="off"></label></div>`;
+  <div class="hp" aria-hidden="true"><label>Leave this empty <input id="hp_field" name="hp_field" tabindex="-1" autocomplete="off"></label></div>`;
   $("dob").max = new Date().toISOString().slice(0, 10);
   $("dob").oninput = $("dob").onchange = refresh;
   $("civil").onchange = () => { touched = false; refresh(); }; // civil status change re-suggests Katandaan
@@ -147,12 +196,13 @@ function renderCommon(officer) {
     if (Math.min(w, h) < 300) msg = "This photo is too small or blurry. Use a clear photo at least 300 pixels wide.";
     else if (ratio > 1.15) msg = "This is a wide (landscape) photo. An ID photo is portrait or square, showing head and shoulders only.";
     else if (ratio < 0.6) msg = "This photo is too narrow. Use a normal portrait or square ID-style photo.";
-    else if (window.FaceDetector) {
+    if (!msg) { const lp = lookCheck(img); if (lp && lp.block) msg = lp.block; else if (lp) note = "Photo accepted, but please check: " + lp.warn; }
+    if (!msg && window.FaceDetector) {
       try {
         const faces = await new FaceDetector({ fastMode: true, maxDetectedFaces: 5 }).detect(img);
         if (faces.length > 1) msg = "More than one face was detected. An ID photo must show only you.";
         else if (faces.length === 1 && faces[0].boundingBox.height / h < 0.2) msg = "Your face is too small in the photo. Move closer or crop to head and shoulders.";
-        else if (!faces.length) note = "We could not clearly detect a face. Make sure your whole face is visible and well lit.";
+        else if (!faces.length && !note) note = "We could not clearly detect a face. Make sure your whole face is visible and well lit.";
       } catch (_) { /* detector unavailable: skip this check */ }
     }
     if (msg) { URL.revokeObjectURL(url); return fail(msg); }
@@ -199,17 +249,22 @@ function wireForm(extra, save) {
   $("f").addEventListener("submit", async e => {
     e.preventDefault();
     if (busy || !db) return;
-    if ($("website").value) { say("Thank you! Your registration was received.", "ok"); return; } // bot trap
+    if ($("hp_field").value) { say("Thank you! Your registration was received.", "ok"); return; } // bot trap
     const c = collect(); if (c.err) return say(c.err, "err");
     const x = extra ? extra() : {}; if (x.err) return say(x.err, "err");
     if (!navigator.onLine) return say("No internet connection. Check your signal and try again.", "err");
     busy = true; $("btn").disabled = true; let path = null;
     try {
+      say("Checking…");
+      // The database also refuses blocked people. If is_blocked() is missing (older database) this check is skipped.
+      const bl = await db.rpc("is_blocked", { p_name: c.row.full_name, p_dob: c.row.date_of_birth });
+      if (!bl.error && bl.data === true) throw new Error("BLOCKED");
       say("Preparing photo…");
       let blob; try { blob = await compress(c.file); } catch (_) { throw new Error("FRIENDLY:This photo could not be read. Please try another photo."); }
       say("Uploading…");
       path = uid() + ".jpg";
-      const up = await db.storage.from("member-photos").upload(path, blob, { contentType: "image/jpeg" });
+      let up = await db.storage.from("member-photos").upload(path, blob, { contentType: "image/jpeg" });
+      if (up.error) { say("Uploading again…"); path = uid() + ".jpg"; up = await db.storage.from("member-photos").upload(path, blob, { contentType: "image/jpeg" }); }
       if (up.error) { console.error(up.error); path = null; throw new Error("FRIENDLY:The photo could not be uploaded. Check your signal and try again, or choose a smaller photo."); }
       c.row.photo_path = path;
       say("Saving…");
