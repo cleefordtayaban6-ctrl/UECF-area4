@@ -102,7 +102,7 @@ function renderCommon(officer) {
   <label for="gift">Spiritual gift (optional)</label><input id="gift" maxlength="80" autocomplete="off"><small class="skip">${SKIP}</small>
   <label for="contact">Contact number (optional)</label><input id="contact" type="tel" maxlength="20" autocomplete="off"><small class="skip">${SKIP}</small>
   <label for="email">Email (optional)</label><input id="email" type="email" maxlength="120" autocomplete="off"><small class="skip">${SKIP}</small>
-  <label for="address">Address (optional)</label><input id="address" maxlength="200" autocomplete="off"><small class="skip">${SKIP}</small>
+  <label for="address">Address *</label><input id="address" maxlength="200" autocomplete="off">
   <label for="photo">Profile photo *</label>
   <input id="photo" type="file" accept="image/jpeg,image/png,image/webp">
   <small>Required. A clear 1x1 or passport-size photo; the whole face must be visible.</small><br>
@@ -141,6 +141,7 @@ function collect() {
   if (!CIVIL.includes($("civil").value)) return { err: "Please choose your civil status." };
   if (!curCat()) return { err: "Please choose a category." };
   if (!$("center").value) return { err: "Please choose your center." };
+  if (v("address").length < 3) return { err: "Please enter your address." };
   const email = v("email"), tel = v("contact");
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { err: "Please enter a valid email address." };
   if (tel && !/^[0-9+()\-\s]{7,20}$/.test(tel)) return { err: "Please enter a valid contact number." };
@@ -151,7 +152,7 @@ function collect() {
     full_name: [first, mid, last, suf].filter(Boolean).join(" "),
     date_of_birth: $("dob").value, gender: $("gender").value, civil_status: $("civil").value,
     category: curCat(), age, center: $("center").value, position: "Member",
-    spiritual_gift: v("gift") || "None", contact_number: tel || null, email: email || null, address: v("address") || null,
+    spiritual_gift: v("gift") || "None", contact_number: tel || null, email: email || null, address: v("address"),
     is_officer: false } };
 }
 
