@@ -32,3 +32,4 @@ a.btn{display:flex;align-items:center;justify-content:center;line-height:1.3;pad
 ul.req{margin:8px 0 12px;padding-left:20px;color:var(--mute)}
 .pstat{margin-top:8px;font-weight:bold;font-size:.95rem}.pstat.ok{color:var(--accent)}.pstat.bad{color:var(--err)}.pstat.warn{color:var(--warn)}
 fieldset.lvl{border:0;padding:0;margin:14px 0 0}fieldset.lvl legend{font-weight:bold;padding:0}
+.lvblk{border-left:3px solid var(--line);padding-left:12px;margin-top:14px}.lvblk h3{font-size:1.05rem;margin:0}

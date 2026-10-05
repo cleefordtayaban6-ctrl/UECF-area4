@@ -63,6 +63,7 @@ td.sel input{width:22px;height:22px;min-height:0;padding:0}
 .nophoto{color:var(--mute);font-size:.85rem}
 #e_prev{display:block;width:120px;height:auto;max-height:160px;object-fit:contain;margin:6px 0;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
 fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bold;padding:0}
+.lvblk{border-left:3px solid var(--line);padding-left:10px;margin-top:8px}
 </style>
 </head>
 <body>
@@ -131,10 +132,8 @@ fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bo
         <label class="chk"><input id="e_lv_local" type="checkbox" style="width:auto"> Local Officer</label>
         <label class="chk"><input id="e_lv_both" type="checkbox" style="width:auto"> Both</label>
       </fieldset>
-      <label for="e_opos">Officer position</label><select id="e_opos"></select>
-      <input id="e_opos_o" maxlength="60" placeholder="Type the position" aria-label="Other position" hidden style="margin-top:6px">
+      <div id="e_lvblocks"></div>
       <label for="e_term">Term</label><select id="e_term"></select>
-      <label for="e_com">Committee / role</label><input id="e_com" maxlength="120">
     </div>
     <label for="e_photo">Photo</label>
     <img id="e_prev" alt="Current photo" hidden>
@@ -161,20 +160,27 @@ CENTERS.forEach(c => { $("fc").add(new Option(c, c)); $("e_center").add(new Opti
 const CIVIL = ["Single","Married","Separated","Widow (Woman)","Widower (Man)"];
 const CATS = ["Junior FYS","Senior FYS","Katandaan"];
 const POS = ["President","Vice President","Secretary","Treasurer","Auditor","P.R.O.","Board Member"];
-[["e_gender",["Male","Female"]],["e_civil",CIVIL],["e_cat",CATS],["e_opos",POS]].forEach(([id, a]) => { $(id).add(new Option("—", "")); a.forEach(v => $(id).add(new Option(v, v))); });
+[["e_gender",["Male","Female"]],["e_civil",CIVIL],["e_cat",CATS]].forEach(([id, a]) => { $(id).add(new Option("—", "")); a.forEach(v => $(id).add(new Option(v, v))); });
 CATS.forEach(c => $("fcat").add(new Option(c, c))); POS.forEach(c => $("fpos").add(new Option(c, c)));
 $("fpos").add(new Option("Others", "__other"));
-$("e_opos").add(new Option("Others (type below)", "__other"));
-$("e_opos").onchange = () => { $("e_opos_o").hidden = $("e_opos").value !== "__other"; };
+// One position block per officer type: the roles can differ (e.g. Local President, Area Secretary)
+const LV = [["Area", "e_lv_area"], ["Local", "e_lv_local"]];
+$("e_lvblocks").innerHTML = LV.map(([k]) => `<div id="e_blk_${k}" class="lvblk" hidden><b>${k} officer</b>
+  <label for="e_pos_${k}">${k} position</label><select id="e_pos_${k}"></select>
+  <input id="e_pos_${k}_o" maxlength="60" placeholder="Type the position" aria-label="Other ${k} position" hidden style="margin-top:6px">
+  <label for="e_com_${k}">${k} committee / role</label><input id="e_com_${k}" maxlength="120"></div>`).join("");
+function syncEdit(){ LV.forEach(([k, id]) => { $("e_blk_" + k).hidden = !$(id).checked; $("e_pos_" + k + "_o").hidden = $("e_pos_" + k).value !== "__other"; }); }
+LV.forEach(([k]) => { const x = $("e_pos_" + k); x.add(new Option("—", "")); POS.forEach(p => x.add(new Option(p, p))); x.add(new Option("Others (type below)", "__other")); x.onchange = syncEdit; });
 const rank = p => POS.includes(p) ? POS.indexOf(p) : 99;
 $("e_off").onchange = () => { $("e_ofs").hidden = !$("e_off").checked; };
-$("e_lv_both").onchange = () => { $("e_lv_area").checked = $("e_lv_local").checked = $("e_lv_both").checked; };
-$("e_lv_area").onchange = $("e_lv_local").onchange = () => { $("e_lv_both").checked = $("e_lv_area").checked && $("e_lv_local").checked; };
+$("e_lv_both").onchange = () => { $("e_lv_area").checked = $("e_lv_local").checked = $("e_lv_both").checked; syncEdit(); };
+$("e_lv_area").onchange = $("e_lv_local").onchange = () => { $("e_lv_both").checked = $("e_lv_area").checked && $("e_lv_local").checked; syncEdit(); };
 // Fixed terms (label, start, end). Add a line here for a future term.
 const TERMS = [["2026\u20132028", "2026-01-01", "2028-12-31"]];
 const yr = d => (d || "").slice(0, 4);
 const termLabel = o => o && o.term_start ? yr(o.term_start) + "\u2013" + yr(o.term_end) : "";
 const ended = o => !!(o && o.term_end && o.term_end < new Date().toISOString().slice(0, 10));
+const posAt = (m, lv) => ((m.offs || []).find(x => (x.officer_level || "Area") === lv) || {}).position || "";
 function offType(m){ const s = new Set((m.offs || []).map(o => o.officer_level || "Area")); return s.size > 1 ? "Both" : ([...s][0] || ""); }
 function fillTerms(o){
   const s = $("e_term"); s.innerHTML = "";
@@ -254,7 +260,7 @@ async function load(){
 function filtered(){
   const c = $("fc").value, q = $("q").value.trim().toLowerCase(), t = $("ft").value, g = $("fcat").value, p = $("fpos").value;
   return all.filter(m => (!c || m.center === c) && (!q || (m.full_name || "").toLowerCase().includes(q))
-    && (!t || (t === "o") === !!m.is_officer) && (!g || m.category === g) && (!p || (m.off && (p === "__other" ? !POS.includes(m.off.position) : m.off.position === p))));
+    && (!t || (t === "o") === !!m.is_officer) && (!g || m.category === g) && (!p || (m.offs || []).some(o => p === "__other" ? !POS.includes(o.position) : o.position === p)));
 }
 
 function render(){
@@ -308,10 +314,11 @@ function openEdit(m){
   $("e_age").value = curAge(m) ?? ""; $("e_pos").value = posOf(m); $("e_gift").value = m.spiritual_gift || "";
   $("e_phone").value = m.contact_number || ""; $("e_email").value = m.email || ""; $("e_addr").value = m.address || "";
   $("e_off").checked = !!m.is_officer; $("e_ofs").hidden = !m.is_officer;
-  const custom = o.position && !POS.includes(o.position); setSel($("e_opos"), custom ? "__other" : o.position); $("e_opos_o").value = custom ? o.position : ""; $("e_opos_o").hidden = !custom;
+  LV.forEach(([k]) => { const r = (m.offs || []).find(x => (x.officer_level || "Area") === k) || {}, c = r.position && !POS.includes(r.position);
+    setSel($("e_pos_" + k), c ? "__other" : r.position); $("e_pos_" + k + "_o").value = c ? r.position : ""; $("e_com_" + k).value = r.committee || ""; });
   const lvs = new Set((m.offs || []).map(x => x.officer_level || "Area"));
   $("e_lv_area").checked = lvs.has("Area"); $("e_lv_local").checked = lvs.has("Local"); $("e_lv_both").checked = lvs.size > 1;
-  fillTerms(o); $("e_com").value = o.committee || "";
+  fillTerms(o); syncEdit();
   if (prevUrl) { URL.revokeObjectURL(prevUrl); prevUrl = null; }
   $("e_prev").src = urls[m.photo_path] || ""; $("e_prev").hidden = !urls[m.photo_path];
   $("dlg").showModal();
@@ -331,9 +338,15 @@ $("ef").addEventListener("submit", async e => {
     if (!first || !last) throw new Error("First and last name are required.");
     const isOff = $("e_off").checked, center = $("e_center").value;
     const levels = [$("e_lv_area").checked && "Area", $("e_lv_local").checked && "Local"].filter(Boolean);
-    const opos = $("e_opos").value === "__other" ? $("e_opos_o").value.trim().replace(/\s+/g, " ") : $("e_opos").value;
+    const picks = {};   // officer type -> {position, committee}; roles can differ per type
+    for (const lv of levels) {
+      let p = $("e_pos_" + lv).value === "__other" ? $("e_pos_" + lv + "_o").value.trim().replace(/\s+/g, " ") : $("e_pos_" + lv).value;
+      const listed = POS.find(x => x.toLowerCase() === p.toLowerCase()); if (listed) p = listed;
+      picks[lv] = {position: p, committee: $("e_com_" + lv).value.trim() || null};
+    }
+    const memberPos = levels.length === 1 ? picks[levels[0]].position : levels.map(lv => picks[lv].position + " (" + lv + ")").join(" / ");
     if (isOff && !levels.length) throw new Error("Choose Area Officer, Local Officer or Both.");
-    if (isOff && (!opos || !$("e_term").value)) throw new Error("Officers need a position and a term.");
+    if (isOff && (levels.some(lv => !picks[lv].position) || !$("e_term").value)) throw new Error("Choose a position for each officer type, and a term.");
     const mine = editing.offs || [];
     // Upload the new photo first (resized to ~900px JPEG); if anything later fails it is removed again
     let photo_path = editing.photo_path, oldPath = null;
@@ -348,12 +361,12 @@ $("ef").addEventListener("submit", async e => {
     // Officer rows (one per level) before the member row, so a duplicate-position error stops the save early
     if (isOff) {
       const [ts, te] = $("e_term").value.split("|");
-      const base = {center, position: opos, term_start: ts || null, term_end: te || null, committee: $("e_com").value.trim() || null};
+      const base = {center, term_start: ts || null, term_end: te || null};
       for (const lv of levels) {
         const ex = mine.find(x => (x.officer_level || "Area") === lv);
-        const r = await (ex ? db.from("area4_officers").update({...base, officer_level: lv}).eq("id", ex.id).select()
-                            : db.from("area4_officers").insert({...base, officer_level: lv, member_id: editing.id}).select());
-        if (r.error) throw new Error(r.error.code === "23505" ? "Another " + opos + " is already registered at " + center + " for this term (" + lv + " officer)." : r.error.message);
+        const r = await (ex ? db.from("area4_officers").update({...base, ...picks[lv], officer_level: lv}).eq("id", ex.id).select()
+                            : db.from("area4_officers").insert({...base, ...picks[lv], officer_level: lv, member_id: editing.id}).select());
+        if (r.error) throw new Error(r.error.code === "23505" ? "Another " + picks[lv].position + " is already registered as a " + lv + " officer at " + center + " for this term." : r.error.message);
         if (!r.data.length) throw new Error("Officer record was not saved (not allowed). Run migration.sql in Supabase.");
       }
       const drop = mine.filter(x => !levels.includes(x.officer_level || "Area")).map(x => x.id);
@@ -366,7 +379,7 @@ $("ef").addEventListener("submit", async e => {
       date_of_birth: dob, gender: $("e_gender").value || null, civil_status: $("e_civil").value || null, category: $("e_cat").value || null,
       center, age: ageNum, is_officer: isOff,
       // un-ticking Officer must not leave the old officer title (e.g. "President") in the member record
-      position: isOff ? opos : (editing.is_officer && $("e_pos").value.trim() === posOf(editing) ? "Member" : ($("e_pos").value.trim() || "Member")),
+      position: isOff ? memberPos : (editing.is_officer && $("e_pos").value.trim() === posOf(editing) ? "Member" : ($("e_pos").value.trim() || "Member")),
       spiritual_gift: $("e_gift").value.trim() || "None", contact_number: $("e_phone").value.trim() || null,
       email: $("e_email").value.trim() || null, address: $("e_addr").value.trim() || null, photo_path
     }).eq("id", editing.id).select();
@@ -404,10 +417,10 @@ function csvCell(v){
   return '"' + v.replace(/"/g, '""') + '"';
 }
 function tableData(list, names){
-  const head = ["No.","Full Name","First Name","Middle Name","Last Name","Date of Birth","Gender","Civil Status","Category","Category Note","Officer","Officer Position","Officer Type","Center","Term Start","Term End","Committee","Age","Position","Spiritual Gift","Contact","Email","Address","Date Registered","Photo File"];
+  const head = ["No.","Full Name","First Name","Middle Name","Last Name","Date of Birth","Gender","Civil Status","Category","Category Note","Officer","Area Position","Local Position","Officer Type","Center","Term Start","Term End","Committee","Age","Position","Spiritual Gift","Contact","Email","Address","Date Registered","Photo File"];
   const fmt = {year:"numeric", month:"short", day:"2-digit", hour:"numeric", minute:"2-digit"};
   const rows = sorted(list).map((m, i) => { const o = m.off || {}; return [i + 1, m.full_name, m.first_name, m.middle_name, m.last_name, m.date_of_birth, m.gender, m.civil_status, m.category,
-    override(m) ? (m.civil_status === "Married" ? "married override" : "marital status override") : "", m.is_officer ? "Yes" : "No", o.position, offType(m), m.center, o.term_start, o.term_end, o.committee,
+    override(m) ? (m.civil_status === "Married" ? "married override" : "marital status override") : "", m.is_officer ? "Yes" : "No", posAt(m, "Area"), posAt(m, "Local"), offType(m), m.center, o.term_start, o.term_end, (m.offs || []).map(x => x.committee).filter(Boolean).join(" / "),
     curAge(m), posOf(m), giftOf(m), m.contact_number, m.email, m.address, new Date(m.created_at).toLocaleString("en-US", fmt), names[m.id] || "No photo"]; });
   return [head, ...rows];
 }

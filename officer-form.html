@@ -17,13 +17,10 @@
       <label class="r"><input type="checkbox" id="lv_area"> Area Officer</label>
       <label class="r"><input type="checkbox" id="lv_local"> Local Officer</label>
       <label class="r"><input type="checkbox" id="lv_both"> Both (Area and Local)</label>
-      <small>Tick Both if you serve at Area 4 and at your local center.</small>
+      <small>Tick Both if you serve at Area 4 and at your local center. You can have a different position for each.</small>
     </fieldset>
-    <label for="opos">Position *</label>
-    <select id="opos"><option value="">Select…</option><option>President</option><option>Vice President</option><option>Secretary</option><option>Treasurer</option><option>Auditor</option><option>P.R.O.</option><option>Board Member</option><option value="__other">Others (type your position)</option></select>
-    <input id="opos_o" maxlength="60" placeholder="Type your position" aria-label="Other position" autocomplete="off" hidden style="margin-top:8px">
+    <div id="lvblocks"></div>
     <label for="term">Term *</label><select id="term"></select>
-    <label for="com">Committee / role description (optional)</label><input id="com" maxlength="120"><small class="skip">Optional: you can skip this if you don't want to fill it in.</small>
     <button id="btn" type="submit">Submit</button>
     <div id="msg" role="status" aria-live="polite"></div>
   </form>
@@ -33,37 +30,54 @@
 <script src="form.js?v=1"></script>
 <script>
 renderCommon(true);
-$("opos").onchange = () => { $("opos_o").hidden = $("opos").value !== "__other"; };
+const POSITIONS = ["President", "Vice President", "Secretary", "Treasurer", "Auditor", "P.R.O.", "Board Member"];
+const LEVELS = [["Area", "Area officer", "lv_area"], ["Local", "Local officer", "lv_local"]];
+// One position block per officer type. The roles can differ (e.g. President locally, Secretary for the Area).
+$("lvblocks").innerHTML = LEVELS.map(([k, t]) => `<div id="blk_${k}" class="lvblk" hidden>
+  <h3>${t} details</h3>
+  <label for="pos_${k}">${t} position *</label>
+  <select id="pos_${k}"><option value="">Select…</option>${POSITIONS.map(p => `<option>${p}</option>`).join("")}<option value="__other">Others (type your position)</option></select>
+  <input id="pos_${k}_o" maxlength="60" placeholder="Type your position" aria-label="Other ${k} position" autocomplete="off" hidden style="margin-top:8px">
+  <label for="com_${k}">Committee / role description (optional)</label><input id="com_${k}" maxlength="120"><small class="skip">${SKIP}</small></div>`).join("");
 // Fixed term. To add another term later, add a line: [label, start date, end date]
 const TERMS = [["2026\u20132028", "2026-01-01", "2028-12-31"]];
 TERMS.forEach(t => $("term").add(new Option(t[0], t[0])));
-$("f").addEventListener("reset", () => setTimeout(() => { $("opos_o").hidden = true; }, 0));
-// Officer type: "Both" ticks Area + Local; ticking both by hand ticks "Both"
+// Officer type: "Both" ticks Area + Local; ticking both by hand ticks "Both". Each ticked type shows its own position block.
 const lvA = $("lv_area"), lvL = $("lv_local"), lvB = $("lv_both");
-lvB.onchange = () => { lvA.checked = lvL.checked = lvB.checked; };
-lvA.onchange = lvL.onchange = () => { lvB.checked = lvA.checked && lvL.checked; };
+function sync() { LEVELS.forEach(([k, , id]) => { $("blk_" + k).hidden = !$(id).checked; $("pos_" + k + "_o").hidden = $("pos_" + k).value !== "__other"; }); }
+lvB.onchange = () => { lvA.checked = lvL.checked = lvB.checked; sync(); };
+lvA.onchange = lvL.onchange = () => { lvB.checked = lvA.checked && lvL.checked; sync(); };
+LEVELS.forEach(([k]) => $("pos_" + k).onchange = sync);
+$("f").addEventListener("reset", () => setTimeout(sync, 0)); // form.reset() does not fire onchange
 function extra() {
-  const levels = [lvA.checked && "Area", lvL.checked && "Local"].filter(Boolean);
-  if (!levels.length) return { err: "Please choose Area Officer, Local Officer or Both." };
-  if (!$("opos").value) return { err: "Please choose your position." };
-  // Typed position: tidy spacing; if it matches a listed position, use the listed spelling (keeps per-center uniqueness reliable)
-  let pos = $("opos").value;
-  if (pos === "__other") {
-    pos = $("opos_o").value.trim().replace(/\s+/g, " ");
-    if (pos.length < 2) return { err: "Please type your position." };
-    const listed = [...$("opos").options].map(o => o.text).find(t => t.toLowerCase() === pos.toLowerCase());
-    if (listed) pos = listed;
+  const levels = [];
+  for (const [k, t, id] of LEVELS) {
+    if (!$(id).checked) continue;
+    let pos = $("pos_" + k).value;
+    if (!pos) return { err: "Please choose your " + t.toLowerCase() + " position." };
+    if (pos === "__other") {
+      // Typed position: tidy spacing; if it matches a listed one, use the listed spelling (keeps uniqueness reliable)
+      pos = $("pos_" + k + "_o").value.trim().replace(/\s+/g, " ");
+      if (pos.length < 2) return { err: "Please type your " + t.toLowerCase() + " position." };
+      const listed = POSITIONS.find(p => p.toLowerCase() === pos.toLowerCase());
+      if (listed) pos = listed;
+    }
+    levels.push({ level: k, position: pos, committee: $("com_" + k).value.trim() || null });
   }
+  if (!levels.length) return { err: "Please choose Area Officer, Local Officer or Both." };
   const t = TERMS.find(x => x[0] === $("term").value);
   if (!t) return { err: "Please choose your term." };
-  return { o_position: pos, levels, term_start: t[1], term_end: t[2], committee: $("com").value.trim() || null };
+  // members.position keeps a readable summary, e.g. "Secretary (Area) / President (Local)"
+  const o_position = levels.length === 1 ? levels[0].position : levels.map(l => l.position + " (" + l.level + ")").join(" / ");
+  return { o_position, levels, term_start: t[1], term_end: t[2] };
 }
 // Dual registration runs inside ONE database transaction (register_officer in migration.sql):
-// members insert/update + area4_officers insert succeed together or roll back together.
+// members insert/update + officer rows succeed together or roll back together.
 wireForm(extra, async (row, x) => {
   const r = await db.rpc("register_officer", { p: { ...row, ...x } });
   if (r.error) {
-    if (/DUPLICATE_POSITION/.test(r.error.message)) throw new Error("FRIENDLY:Another " + x.o_position + " is already registered at " + row.center + " for this term (" + x.levels.join(" and ") + "). Please choose a different position or tell the admin.");
+    const d = /DUPLICATE_POSITION\|([^|]*)\|(.*)$/.exec(r.error.message || "");
+    if (d) throw new Error("FRIENDLY:Another " + d[2].trim() + " is already registered as a " + d[1] + " officer at " + row.center + " for this term. Please choose a different position or tell the admin.");
     throw r.error;
   }
 });
