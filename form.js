@@ -66,6 +66,7 @@ function compress(file) { // ~900px JPEG
   });
 }
 
+let photoOk = false; // true only after the chosen photo passes the ID-style checks
 let touched = false; // true once the user manually picks a category
 const curCat = () => (document.querySelector("input[name=cat]:checked") || {}).value || null;
 function refresh() {
@@ -103,12 +104,21 @@ function renderCommon(officer) {
   <label for="contact">Contact number (optional)</label><input id="contact" type="tel" maxlength="20" autocomplete="off"><small class="skip">${SKIP}</small>
   <label for="email">Email (optional)</label><input id="email" type="email" maxlength="120" autocomplete="off"><small class="skip">${SKIP}</small>
   <label for="address">Address *</label><input id="address" maxlength="200" autocomplete="off">
-  <label for="photo">Profile photo *</label>
-  <input id="photo" type="file" accept="image/jpeg,image/png,image/webp">
-  <small>Required. A clear 1x1 or passport-size photo; the whole face must be visible.</small><br>
-  <img id="preview" alt="Photo preview">
-  <dialog id="tip"><h2 style="margin:0 0 8px;font-size:1.2rem">Before you choose a photo</h2>
-    <p>Please do <b>not</b> upload just any photo. Make sure the <b>whole face is clearly visible</b>.</p>
+  <fieldset class="photo-card"><legend>Profile photo (ID-style) *</legend>
+    <p class="ph-lead">Upload a photo like a <b>school ID or passport picture</b>. Casual, posed or Facebook-style pictures are not accepted.</p>
+    <div class="ph-ex">
+      <figure><svg viewBox="0 0 90 110" width="90" height="110" role="img" aria-label="Accepted: head and shoulders on a plain background"><rect width="90" height="110" rx="6" style="fill:var(--bg);stroke:var(--line)"/><circle cx="45" cy="42" r="19" style="fill:var(--mute)"/><path d="M12 110c2-26 17-38 33-38s31 12 33 38z" style="fill:var(--mute)"/></svg><figcaption class="ok">&#10003; Accepted</figcaption></figure>
+      <figure><svg viewBox="0 0 90 110" width="90" height="110" role="img" aria-label="Not accepted: casual, wide or full-body photo with a busy background"><rect width="90" height="110" rx="6" style="fill:var(--bg);stroke:var(--line)"/><path d="M0 72l20-25 15 15 18-30 37 40v38H0z" style="fill:var(--line)"/><circle cx="62" cy="62" r="7" style="fill:var(--mute)"/><path d="M50 110c1-14 6-22 12-22s11 8 12 22z" style="fill:var(--mute)"/><path d="M10 10L80 100" style="stroke:var(--err);stroke-width:4"/></svg><figcaption class="bad">&#10007; Not accepted</figcaption></figure>
+    </div>
+    <ul class="req"><li>Plain, light background</li><li>Head and shoulders, facing the camera</li><li>Whole face clear, well lit, no filters</li><li>Only you in the photo; no hat or sunglasses</li></ul>
+    <input id="photo" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose ID-style photo">
+    <div id="pstat" class="pstat" role="status" aria-live="polite"></div>
+    <img id="preview" alt="Photo preview">
+    <label class="r"><input type="checkbox" id="idconfirm"> I confirm this is a recent school-ID style photo of myself.</label>
+  </fieldset>
+  <dialog id="tip"><h2 style="margin:0 0 8px;font-size:1.2rem">ID-style photo only</h2>
+    <p>Choose a photo like a <b>school ID or passport picture</b>: plain background, head and shoulders, facing the camera, whole face clear.</p>
+    <p><b>Not accepted:</b> casual or Facebook-style poses, selfies with filters, group or full-body shots, sunglasses or hats.</p>
     <button id="tipok" type="button">I understand, choose photo</button><button id="tipno" type="button" class="plain">Cancel</button></dialog>
   <div class="hp" aria-hidden="true"><label>Website <input id="website" tabindex="-1" autocomplete="off"></label></div>`;
   $("dob").max = new Date().toISOString().slice(0, 10);
@@ -119,11 +129,36 @@ function renderCommon(officer) {
   $("photo").addEventListener("click", e => { if (tipOk) { tipOk = false; return; } e.preventDefault(); $("tip").showModal(); });
   $("tipok").onclick = () => { $("tip").close(); tipOk = true; $("photo").click(); };
   $("tipno").onclick = () => $("tip").close();
-  $("photo").addEventListener("change", () => {
-    const f = $("photo").files[0], p = $("preview"); say("");
-    if (!f) { p.style.display = "none"; return; }
-    if (f.size > 25 * 1024 * 1024 || !/^image\/(jpeg|png|webp)$/.test(f.type)) { say("Please choose a JPG, PNG or WEBP photo.", "err"); $("photo").value = ""; p.style.display = "none"; return; }
-    p.src = URL.createObjectURL(f); p.style.display = "block";
+  let photoSeq = 0;
+  // Automatic checks: format, size, portrait/square shape, and (where the browser supports it) face count and size.
+  // These catch obvious non-ID photos; the admin can still review every photo.
+  $("photo").addEventListener("change", async () => {
+    const f = $("photo").files[0], p = $("preview"), st = $("pstat"), seq = ++photoSeq;
+    say(""); photoOk = false; p.style.display = "none"; st.textContent = ""; st.className = "pstat";
+    if (!f) return;
+    const fail = m => { if (seq !== photoSeq) return; $("photo").value = ""; p.style.display = "none"; st.textContent = "\u2717 " + m; st.className = "pstat bad"; };
+    if (f.size > 25 * 1024 * 1024 || !/^image\/(jpeg|png|webp)$/.test(f.type)) return fail("Please choose a JPG, PNG or WEBP photo.");
+    const url = URL.createObjectURL(f), img = new Image();
+    try { await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; }); }
+    catch (_) { URL.revokeObjectURL(url); return fail("This photo could not be read. Please choose another one."); }
+    const w = img.naturalWidth, h = img.naturalHeight, ratio = w / h;
+    let msg = null, note = "";
+    if (Math.min(w, h) < 300) msg = "This photo is too small or blurry. Use a clear photo at least 300 pixels wide.";
+    else if (ratio > 1.15) msg = "This is a wide (landscape) photo. An ID photo is portrait or square, showing head and shoulders only.";
+    else if (ratio < 0.6) msg = "This photo is too narrow. Use a normal portrait or square ID-style photo.";
+    else if (window.FaceDetector) {
+      try {
+        const faces = await new FaceDetector({ fastMode: true, maxDetectedFaces: 5 }).detect(img);
+        if (faces.length > 1) msg = "More than one face was detected. An ID photo must show only you.";
+        else if (faces.length === 1 && faces[0].boundingBox.height / h < 0.2) msg = "Your face is too small in the photo. Move closer or crop to head and shoulders.";
+        else if (!faces.length) note = "We could not clearly detect a face. Make sure your whole face is visible and well lit.";
+      } catch (_) { /* detector unavailable: skip this check */ }
+    }
+    if (msg) { URL.revokeObjectURL(url); return fail(msg); }
+    if (seq !== photoSeq) return URL.revokeObjectURL(url);
+    p.src = url; p.style.display = "block"; photoOk = true;
+    st.textContent = note || "\u2713 Photo accepted. Please check that it matches the requirements above.";
+    st.className = "pstat " + (note ? "warn" : "ok");
   });
 }
 
@@ -146,7 +181,8 @@ function collect() {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { err: "Please enter a valid email address." };
   if (tel && !/^[0-9+()\-\s]{7,20}$/.test(tel)) return { err: "Please enter a valid contact number." };
   const file = $("photo").files[0];
-  if (!file) return { err: "Profile photo is required. Please upload a clear 1x1 or passport-size photo." };
+  if (!file || !photoOk) return { err: "Profile photo is required. Please upload a clear 1x1 or passport-size photo." };
+  if (!$("idconfirm").checked) return { err: "Please confirm that your photo is a school-ID style photo." };
   return { file, row: {
     first_name: first, middle_name: mid, last_name: last + (suf ? " " + suf : ""),
     full_name: [first, mid, last, suf].filter(Boolean).join(" "),
@@ -178,7 +214,7 @@ function wireForm(extra, save) {
       say("Saving…");
       await save(c.row, x);
       const name = c.row.full_name;
-      $("f").reset(); touched = false; $("preview").style.display = "none"; refresh();
+      $("f").reset(); touched = false; $("preview").style.display = "none"; $("pstat").textContent = ""; photoOk = false; refresh();
       say("Thank you! " + name + " is registered. You can fill out the form again for another person.", "ok");
       $("msg").scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (err) {
