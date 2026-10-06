@@ -64,6 +64,10 @@ td.sel input{width:22px;height:22px;min-height:0;padding:0}
 #e_prev{display:block;width:120px;height:auto;max-height:160px;object-fit:contain;margin:6px 0;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
 fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bold;padding:0}
 .lvblk{border-left:3px solid var(--line);padding-left:10px;margin-top:8px}
+.badge.dn{background:var(--mute)}
+button[data-act=edit]:disabled{cursor:not-allowed}
+.pstat{margin:4px 0 6px;font-weight:bold;font-size:.9rem}.pstat.ok{color:var(--accent)}.pstat.warn{color:#8a5a00}
+@media (prefers-color-scheme:dark){.pstat.warn{color:#f0c36a}}
 </style>
 </head>
 <body>
@@ -94,6 +98,8 @@ fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bo
     <button id="zip" type="button">Download Photos (ZIP)</button>
     <button id="blist" type="button" class="plain">Blocked list</button>
     <button id="selbtn" type="button" class="plain">Select all shown</button>
+    <button id="donebtn" type="button" hidden>Done (0)</button>
+    <button id="undobtn" type="button" class="plain" hidden>Undo done (0)</button>
     <button id="delsel" type="button" class="del" hidden>Delete selected (0)</button>
     <button id="delall" type="button" class="del">Delete all</button>
     <button id="out" type="button" class="plain">Log out</button>
@@ -121,7 +127,7 @@ fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bo
     <label for="e_center">Center</label><select id="e_center" required></select>
     <label for="e_age">Age</label><input id="e_age" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" required>
     <label for="e_pos">Position</label><input id="e_pos" maxlength="80">
-    <label for="e_gift">Spiritual gift</label><select id="e_gift"></select>
+    <label for="e_gift">Spiritual gift *</label><select id="e_gift"></select>
     <label for="e_phone">Contact number</label><input id="e_phone" maxlength="20">
     <label for="e_email">Email</label><input id="e_email" type="email" maxlength="120">
     <label for="e_addr">Address</label><input id="e_addr" maxlength="200">
@@ -139,7 +145,8 @@ fieldset.lv{border:0;padding:0;margin:10px 0 0}fieldset.lv legend{font-weight:bo
     <label for="e_photo">Photo</label>
     <img id="e_prev" alt="Current photo" hidden>
     <input id="e_photo" type="file" accept="image/*">
-    <small>Leave empty to keep the current photo. Any size is fine; it is resized automatically.</small>
+    <small>Leave empty to keep the current photo. Any size is fine; a new photo is resized and placed on a white background automatically.</small>
+    <div id="e_pstat" class="pstat" role="status" aria-live="polite"></div>
     <div id="eerr" class="err" role="alert"></div>
     <div class="btns">
       <button id="esave" type="submit">Save changes</button>
@@ -170,7 +177,7 @@ const CATS = ["Junior FYS","Senior FYS","Katandaan"];
 const GIFTS = ["Medium","Perlante/Saksi","Evangelista","Vidente","Corandera","Corandero","Angeles ti Daga (kumakanta/cantora)"];
 const POS = ["President","Vice President","Secretary","Treasurer","Auditor","P.R.O.","Board Member"];
 [["e_gender",["Male","Female"]],["e_civil",CIVIL],["e_cat",CATS]].forEach(([id, a]) => { $(id).add(new Option("—", "")); a.forEach(v => $(id).add(new Option(v, v))); });
-$("e_gift").add(new Option("None / skip", "")); GIFTS.forEach(g => $("e_gift").add(new Option(g, g)));
+GIFTS.concat("None").forEach(g => $("e_gift").add(new Option(g, g)));
 CATS.forEach(c => $("fcat").add(new Option(c, c))); POS.forEach(c => $("fpos").add(new Option(c, c)));
 $("fpos").add(new Option("Others", "__other"));
 // One position block per officer type: the roles can differ (e.g. Local President, Area Secretary)
@@ -200,24 +207,76 @@ function fillTerms(o){
   }
 }
 const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(36).slice(2);
-function compress(file){ // same as the public forms: ~900px JPEG, so big phone photos always fit
-  return new Promise((res, rej) => {
-    const img = new Image(), u = URL.createObjectURL(file);
-    img.onload = () => { URL.revokeObjectURL(u);
-      const k = Math.min(1, 900 / Math.max(img.width, img.height)), c = document.createElement("canvas");
-      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-      c.toBlob(b => b ? res(b) : rej(new Error("compress")), "image/jpeg", 0.85); };
-    img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("unreadable")); };
-    img.src = u;
-  });
+// ---- White background pipeline (same as form.js; this page does not load form.js) ----
+// 1) shrink to ~900px  2) cut the person out with @imgly/background-removal  3) paint the cut-out on pure white
+// 4) export JPEG. If the cut-out fails or takes too long, the original is flattened onto white instead.
+const BG_LIB = "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.5.5/+esm";
+const BG_TIMEOUT = 30000; // ms to wait for the cut-out before falling back to plain flattening
+let bgLib = null;         // module promise: loaded once, on first use
+function loadBgLib() {
+  if (!bgLib) bgLib = import(BG_LIB).catch(e => { bgLib = null; throw e; }); // a failed load can be retried
+  return bgLib;
+}
+const withTimeout = (p, ms) => new Promise((res, rej) => {
+  const t = setTimeout(() => rej(new Error("timeout")), ms);
+  p.then(v => { clearTimeout(t); res(v); }, e => { clearTimeout(t); rej(e); });
+});
+const loadImage = blob => new Promise((res, rej) => {
+  const img = new Image(), u = URL.createObjectURL(blob);
+  img.onload = () => { URL.revokeObjectURL(u); res(img); };
+  img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("unreadable")); };
+  img.src = u;
+});
+const toBlob = (c, type, q) => new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error("toBlob")), type, q));
+function opaqueShare(img) { // share of clearly visible pixels: a near-empty cut-out means the removal failed
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(img, 0, 0, 64, 64);
+  const d = x.getImageData(0, 0, 64, 64).data; let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 128) n++;
+  return n / (64 * 64);
+}
+async function whiteBg(file) { // -> { blob: JPEG on #FFFFFF, removed: true if the background was really cut out }
+  const img = await loadImage(file);
+  const s = Math.min(1, 900 / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * s)), h = Math.max(1, Math.round(img.naturalHeight * s));
+  const base = document.createElement("canvas"); base.width = w; base.height = h;
+  base.getContext("2d").drawImage(img, 0, 0, w, h);
+  const cutOut = async () => {
+    const mod = await loadBgLib();
+    const fn = typeof mod.removeBackground === "function" ? mod.removeBackground : (mod.default && mod.default.removeBackground) || mod.default;
+    if (typeof fn !== "function") throw new Error("removeBackground not found");
+    const out = await fn(await toBlob(base, "image/jpeg", 0.92), { model: "isnet_quint8", device: "cpu", output: { format: "image/png" } }); // smallest model, no GPU needed: safest on phones
+    const cut = await loadImage(out);
+    if (opaqueShare(cut) < 0.06) throw new Error("empty cut-out");
+    return cut;
+  };
+  let cut = null;
+  try { cut = await withTimeout(cutOut(), BG_TIMEOUT); } catch (e) { console.warn("Background removal skipped:", e); }
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const x = c.getContext("2d"); x.fillStyle = "#FFFFFF"; x.fillRect(0, 0, w, h);
+  x.drawImage(cut || base, 0, 0, w, h);
+  return { blob: await toBlob(c, "image/jpeg", 0.85), removed: !!cut };
 }
 let prevUrl = null;
-$("e_photo").addEventListener("change", () => {
+let ePhoto = { blob: null, busy: false, seq: 0 }; // white-background version of the newly chosen photo
+$("e_photo").addEventListener("change", async () => {
   if (prevUrl) { URL.revokeObjectURL(prevUrl); prevUrl = null; }
-  const f = $("e_photo").files[0], cur = editing && urls[editing.photo_path];
-  if (f) prevUrl = URL.createObjectURL(f);
-  const src = prevUrl || cur || ""; $("e_prev").src = src; $("e_prev").hidden = !src;
+  const f = $("e_photo").files[0], seq = ++ePhoto.seq, st = $("e_pstat"), cur = editing && urls[editing.photo_path];
+  ePhoto.blob = null; ePhoto.busy = false; st.textContent = ""; st.className = "pstat";
+  if (!f) { $("e_prev").src = cur || ""; $("e_prev").hidden = !cur; return; }
+  ePhoto.busy = true; st.textContent = "Removing background\u2026 (the first photo can take a little longer)";
+  let res;
+  try { res = await whiteBg(f); }
+  catch (_) {
+    if (seq !== ePhoto.seq) return;
+    ePhoto.busy = false; $("e_photo").value = ""; $("e_prev").src = cur || ""; $("e_prev").hidden = !cur;
+    st.textContent = "\u2717 This photo could not be read. Please choose a JPG, PNG or WebP image."; st.className = "pstat err"; return;
+  }
+  if (seq !== ePhoto.seq) return; // a newer photo was chosen, or the dialog was reopened
+  ePhoto.busy = false; ePhoto.blob = res.blob;
+  prevUrl = URL.createObjectURL(res.blob); $("e_prev").src = prevUrl; $("e_prev").hidden = false;
+  st.textContent = res.removed ? "\u2713 Background replaced with white." : "The background could not be removed automatically, so the photo was placed on white as it is.";
+  st.className = "pstat " + (res.removed ? "ok" : "warn");
 });
 function ageOf(dob){ const d = new Date(dob + "T00:00:00"), n = new Date(); if (!dob || isNaN(d) || d > n) return null;
   let a = n.getFullYear() - d.getFullYear(); if (n.getMonth() < d.getMonth() || (n.getMonth() === d.getMonth() && n.getDate() < d.getDate())) a--; return a; }
@@ -289,13 +348,13 @@ function render(){
   $("rows").innerHTML = list.length ? list.map(m => `<tr>
     <td class="sel" data-label="Select"><input type="checkbox" data-sel="${m.id}" ${sel.has(m.id) ? "checked" : ""} aria-label="Select ${esc(m.full_name)}"></td>
     <td class="ph">${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img loading="lazy" src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : '<span class="nophoto">No photo</span>'}</td>
-    <td data-label="Name">${esc(m.full_name)}${isNew(m) ? '<span class="badge" style="background:var(--err);color:#fff">New</span>' : ""}${m.is_officer ? '<span class="badge">Officer</span>' : ""}</td>
+    <td data-label="Name">${esc(m.full_name)}${isNew(m) ? '<span class="badge" style="background:var(--err);color:#fff">New</span>' : ""}${m.is_officer ? '<span class="badge">Officer</span>' : ""}${m.is_done ? '<span class="badge dn">Done</span>' : ""}</td>
     <td data-label="Category">${esc(m.category)}${override(m)}</td><td data-label="Civil status">${esc(m.civil_status)}</td>
     <td data-label="Center">${esc(m.center)}</td>
     <td data-label="Age">${curAge(m) ?? ""}</td>
     <td data-label="Position">${esc(posOf(m))}</td><td data-label="Spiritual gift">${esc(giftOf(m))}</td>
     <td data-label="Registered">${new Date(m.created_at).toLocaleDateString()}</td>
-    <td class="act"><button type="button" class="plain sm" data-act="edit" data-id="${m.id}">Edit</button>
+    <td class="act"><button type="button" class="plain sm" data-act="edit" data-id="${m.id}"${m.is_done ? ' disabled title="Marked Done: select it and press Undo done to edit"' : ""}>Edit</button>
       <button type="button" class="del sm" data-act="del" data-id="${m.id}">Delete</button>
       <button type="button" class="plain sm" data-act="block" data-id="${m.id}">Block</button></td></tr>`).join("")
     : '<tr><td colspan="11">No members found.</td></tr>';
@@ -324,12 +383,14 @@ async function removeMember(m){
 }
 
 function openEdit(m){
+  if (m.is_done) return alert("This member is marked Done and is locked.\nTick the row and press \"Undo done\" to edit it again.");
   editing = m; $("eerr").textContent = ""; $("e_photo").value = "";
+  ePhoto.seq++; ePhoto.blob = null; ePhoto.busy = false; $("e_pstat").textContent = ""; $("e_pstat").className = "pstat";
   const p = (m.full_name || "").split(" "), o = m.off || {};
   $("e_first").value = m.first_name ?? p[0] ?? ""; $("e_mid").value = m.middle_name || ""; $("e_last").value = m.last_name ?? p.slice(1).join(" ");
   $("e_dob").value = m.date_of_birth || ""; setSel($("e_gender"), m.gender); setSel($("e_civil"), m.civil_status); setSel($("e_cat"), m.category);
   setSel($("e_center"), m.center);
-  $("e_age").value = curAge(m) ?? ""; $("e_pos").value = posOf(m); setSel($("e_gift"), m.spiritual_gift && m.spiritual_gift.trim().toLowerCase() !== "none" ? m.spiritual_gift : ""); // an older typed gift stays selectable
+  $("e_age").value = curAge(m) ?? ""; $("e_pos").value = posOf(m); setSel($("e_gift"), m.spiritual_gift && m.spiritual_gift.trim() && m.spiritual_gift.trim().toLowerCase() !== "none" ? m.spiritual_gift : "None"); // blank/NULL/None open as None; an older typed gift stays selectable
   $("e_phone").value = m.contact_number || ""; $("e_email").value = m.email || ""; $("e_addr").value = m.address || "";
   $("e_off").checked = !!m.is_officer; $("e_ofs").hidden = !m.is_officer;
   LV.forEach(([k]) => { const r = (m.offs || []).find(x => (x.officer_level || "Area") === k) || {}, c = r.position && !POS.includes(r.position);
@@ -354,6 +415,8 @@ $("ef").addEventListener("submit", async e => {
     if (!(ageNum >= 1 && ageNum <= 120)) throw new Error("Please enter a valid age (1 to 120).");
     const first = $("e_first").value.trim(), mid = $("e_mid").value.trim(), last = $("e_last").value.trim();
     if (!first || !last) throw new Error("First and last name are required.");
+    const gift = $("e_gift").value;
+    if (!gift) throw new Error("Please choose a spiritual gift (choose \"None\" if you prefer not to name one).");
     const isOff = $("e_off").checked, center = $("e_center").value;
     const levels = [$("e_lv_area").checked && "Area", $("e_lv_local").checked && "Local"].filter(Boolean);
     const picks = {};   // officer type -> {position, committee}; roles can differ per type
@@ -370,7 +433,8 @@ $("ef").addEventListener("submit", async e => {
     let photo_path = editing.photo_path, oldPath = null;
     const file = $("e_photo").files[0];
     if (file) {
-      let blob; try { blob = await compress(file); } catch (_) { throw new Error("This photo could not be read. Please choose a JPG, PNG or WebP image."); }
+      if (ePhoto.busy) throw new Error("The new photo is still being prepared (background removal). Please wait a moment and save again.");
+      const blob = ePhoto.blob; if (!blob) throw new Error("This photo could not be read. Please choose a JPG, PNG or WebP image.");
       const np = uid() + ".jpg";
       const up = await db.storage.from("member-photos").upload(np, blob, {contentType: "image/jpeg"});
       if (up.error) throw new Error("Photo upload failed: " + up.error.message);
@@ -398,7 +462,7 @@ $("ef").addEventListener("submit", async e => {
       center, age: ageNum, is_officer: isOff,
       // un-ticking Officer must not leave the old officer title (e.g. "President") in the member record
       position: isOff ? memberPos : (editing.is_officer && $("e_pos").value.trim() === posOf(editing) ? "Member" : ($("e_pos").value.trim() || "Member")),
-      spiritual_gift: $("e_gift").value || "None", contact_number: $("e_phone").value.trim() || null,
+      spiritual_gift: gift, contact_number: $("e_phone").value.trim() || null,
       email: $("e_email").value.trim() || null, address: $("e_addr").value.trim() || null, photo_path
     }).eq("id", editing.id).select();
     if (r.error) throw new Error(r.error.code === "23505" ? "Another member with the same name and email already exists." : r.error.message);
@@ -533,12 +597,38 @@ function updSel(){
   const oc = $("fv").value === "c", n = selected().length, shown = filtered().length;
   $("delsel").hidden = oc || !n; $("delsel").textContent = "Delete selected (" + n + ")";
   $("selbtn").hidden = oc; $("selbtn").textContent = n && n === shown ? "Clear selection" : "Select all shown";
+  const nd = selected().filter(m => m.is_done).length, nt = n - nd;   // ticked rows already Done / not yet Done
+  $("donebtn").hidden = oc || !nt; $("donebtn").textContent = "Done (" + nt + ")";
+  $("undobtn").hidden = oc || !nd; $("undobtn").textContent = "Undo done (" + nd + ")";
 }
 $("rows").addEventListener("change", e => {
   const c = e.target.closest("input[data-sel]"); if (!c) return;
   c.checked ? sel.add(c.dataset.sel) : sel.delete(c.dataset.sel); updSel();
 });
 $("selbtn").onclick = () => { const f = filtered(); if (selected().length === f.length) f.forEach(m => sel.delete(m.id)); else f.forEach(m => sel.add(m.id)); render(); };
+
+// DONE / UNDO DONE: ticked rows are locked against editing (members.is_done, see migration.sql step 9). Stored in the
+// database, so the lock is the same on every phone and computer. Ticked rows are un-ticked afterwards.
+async function setDone(list, flag, btn){
+  if (!list.length) return;
+  const ids = list.map(m => m.id), byId = new Map(all.map(m => [m.id, m])), label = btn.textContent; let n = 0;
+  btn.disabled = true;
+  try {
+    for (let i = 0; i < ids.length; i += 50) {
+      const part = ids.slice(i, i + 50);
+      const r = await db.from("members").update({is_done: flag}).in("id", part).select("id");
+      if (r.error) throw r.error;
+      (r.data || []).forEach(x => { const m = byId.get(x.id); if (m) m.is_done = flag; sel.delete(x.id); n++; });
+      btn.textContent = (flag ? "Marking " : "Unlocking ") + n + "/" + ids.length;
+    }
+    if (n < ids.length) alert(n + " of " + ids.length + " could not be changed (not allowed). Check the admin policies in Supabase (migration.sql).");
+  } catch (err) {
+    console.error(err);
+    alert("Could not update: " + (/is_done|column|schema cache/i.test(err.message || "") ? "run migration.sql in Supabase first (step 9)." : (err.message || "check your internet and try again.")));
+  } finally { btn.disabled = false; btn.textContent = label; render(); }
+}
+$("donebtn").onclick = () => setDone(selected().filter(m => !m.is_done), true, $("donebtn"));
+$("undobtn").onclick = () => setDone(selected().filter(m => m.is_done), false, $("undobtn"));
 
 // Shared by "Delete all/shown" and "Delete selected": confirm + type DELETE + automatic CSV backup, then
 // delete in batches of 50 with their photos (officer rows go automatically via ON DELETE CASCADE).

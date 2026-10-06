@@ -53,19 +53,55 @@ function friendly(err) {
   if (!navigator.onLine || /fetch|network/i.test(m)) return "No internet connection. Check your signal and try again.";
   return "Something went wrong. Please try again, or tell the admin.";
 }
-function compress(file) { // ~900px JPEG
-  return new Promise((res, rej) => {
-    const img = new Image(), u = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(u);
-      const s = Math.min(1, 900 / Math.max(img.width, img.height)), c = document.createElement("canvas");
-      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-      c.toBlob(b => b ? res(b) : rej(new Error("compress")), "image/jpeg", 0.82);
-    };
-    img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("unreadable")); };
-    img.src = u;
-  });
+// ---- White background pipeline: runs entirely in the browser (no server, no API key) ----
+// 1) shrink to ~900px  2) cut the person out with @imgly/background-removal  3) paint the cut-out on pure white
+// 4) export JPEG. If the cut-out fails or takes too long, the original is flattened onto white instead.
+const BG_LIB = "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.5.5/+esm";
+const BG_TIMEOUT = 30000; // ms to wait for the cut-out before falling back to plain flattening
+let bgLib = null;         // module promise: loaded once, on first use
+function loadBgLib() {
+  if (!bgLib) bgLib = import(BG_LIB).catch(e => { bgLib = null; throw e; }); // a failed load can be retried
+  return bgLib;
+}
+const withTimeout = (p, ms) => new Promise((res, rej) => {
+  const t = setTimeout(() => rej(new Error("timeout")), ms);
+  p.then(v => { clearTimeout(t); res(v); }, e => { clearTimeout(t); rej(e); });
+});
+const loadImage = blob => new Promise((res, rej) => {
+  const img = new Image(), u = URL.createObjectURL(blob);
+  img.onload = () => { URL.revokeObjectURL(u); res(img); };
+  img.onerror = () => { URL.revokeObjectURL(u); rej(new Error("unreadable")); };
+  img.src = u;
+});
+const toBlob = (c, type, q) => new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error("toBlob")), type, q));
+function opaqueShare(img) { // share of clearly visible pixels: a near-empty cut-out means the removal failed
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(img, 0, 0, 64, 64);
+  const d = x.getImageData(0, 0, 64, 64).data; let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 128) n++;
+  return n / (64 * 64);
+}
+async function whiteBg(file) { // -> { blob: JPEG on #FFFFFF, removed: true if the background was really cut out }
+  const img = await loadImage(file);
+  const s = Math.min(1, 900 / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * s)), h = Math.max(1, Math.round(img.naturalHeight * s));
+  const base = document.createElement("canvas"); base.width = w; base.height = h;
+  base.getContext("2d").drawImage(img, 0, 0, w, h);
+  const cutOut = async () => {
+    const mod = await loadBgLib();
+    const fn = typeof mod.removeBackground === "function" ? mod.removeBackground : (mod.default && mod.default.removeBackground) || mod.default;
+    if (typeof fn !== "function") throw new Error("removeBackground not found");
+    const out = await fn(await toBlob(base, "image/jpeg", 0.92), { model: "isnet_quint8", device: "cpu", output: { format: "image/png" } }); // smallest model, no GPU needed: safest on phones
+    const cut = await loadImage(out);
+    if (opaqueShare(cut) < 0.06) throw new Error("empty cut-out");
+    return cut;
+  };
+  let cut = null;
+  try { cut = await withTimeout(cutOut(), BG_TIMEOUT); } catch (e) { console.warn("Background removal skipped:", e); }
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const x = c.getContext("2d"); x.fillStyle = "#FFFFFF"; x.fillRect(0, 0, w, h);
+  x.drawImage(cut || base, 0, 0, w, h);
+  return { blob: await toBlob(c, "image/jpeg", 0.85), removed: !!cut };
 }
 
 /*A*/
@@ -116,6 +152,8 @@ function lookCheck(img) {
 }
 
 let photoOk = false; // true only after the chosen photo passes the ID-style checks
+let photoBlob = null; // the white-background JPEG that will be uploaded (never the original)
+let photoBusy = false; // true while the background is being removed
 let touched = false; // true once the user manually picks a category
 const curCat = () => (document.querySelector("input[name=cat]:checked") || {}).value || null;
 function refresh() {
@@ -149,7 +187,7 @@ function renderCommon(officer) {
   <label for="center">${officer ? "Assigned center *" : "Center *"}</label>
   <select id="center"><option value="">Select…</option>${CENTERS.map(c => `<option>${c}</option>`).join("")}</select>
   ${officer ? '<small>Each center has its own officers. Select the center where you serve.</small>' : ""}
-  <label for="gift">Spiritual gift (optional)</label><select id="gift"><option value="">None / skip</option>${GIFTS.map(g => `<option>${g}</option>`).join("")}</select><small class="skip">${SKIP}</small>
+  <label for="gift">Spiritual gift *</label><select id="gift"><option value="">Select\u2026</option>${GIFTS.concat("None").map(g => `<option>${g}</option>`).join("")}</select>
   <label for="contact">Contact number (optional)</label><input id="contact" type="tel" maxlength="20" autocomplete="off"><small class="skip">${SKIP}</small>
   <label for="email">Email (optional)</label><input id="email" type="email" maxlength="120" autocomplete="off"><small class="skip">${SKIP}</small>
   <label for="address">Address *</label><input id="address" maxlength="200" autocomplete="off">
@@ -183,7 +221,7 @@ function renderCommon(officer) {
   // These catch obvious non-ID photos; the admin can still review every photo.
   $("photo").addEventListener("change", async () => {
     const f = $("photo").files[0], p = $("preview"), st = $("pstat"), seq = ++photoSeq;
-    say(""); photoOk = false; p.style.display = "none"; st.textContent = ""; st.className = "pstat";
+    say(""); photoOk = false; photoBlob = null; photoBusy = false; p.style.display = "none"; st.textContent = ""; st.className = "pstat";
     if (prevUrl) { URL.revokeObjectURL(prevUrl); prevUrl = null; }
     if (!f) return;
     const fail = m => { if (seq !== photoSeq) return; $("photo").value = ""; p.style.display = "none"; st.textContent = "\u2717 " + m; st.className = "pstat bad"; };
@@ -205,11 +243,23 @@ function renderCommon(officer) {
         else if (!faces.length && !note) note = "We could not clearly detect a face. Make sure your whole face is visible and well lit.";
       } catch (_) { /* detector unavailable: skip this check */ }
     }
-    if (msg) { URL.revokeObjectURL(url); return fail(msg); }
-    if (seq !== photoSeq) return URL.revokeObjectURL(url);
-    p.src = url; prevUrl = url; p.style.display = "block"; photoOk = true;
-    st.textContent = note || "\u2713 Photo accepted. Please check that it matches the requirements above.";
-    st.className = "pstat " + (note ? "warn" : "ok");
+    URL.revokeObjectURL(url); // the checks above ran on the original; the preview below shows the white-background version
+    if (msg) return fail(msg);
+    if (seq !== photoSeq) return;
+    photoBusy = true; st.textContent = "Removing background\u2026 (the first photo can take a little longer)"; st.className = "pstat";
+    let res;
+    try { res = await whiteBg(f); }
+    catch (_) { if (seq === photoSeq) photoBusy = false; return fail("This photo could not be read. Please choose another one."); }
+    if (seq !== photoSeq) return; // a newer photo was chosen meanwhile
+    photoBusy = false; photoBlob = res.blob;
+    prevUrl = URL.createObjectURL(res.blob); p.src = prevUrl; p.style.display = "block"; photoOk = true;
+    if (res.removed) {
+      st.textContent = note || "\u2713 Photo accepted with a white background. Please check that it matches the requirements above.";
+      st.className = "pstat " + (note ? "warn" : "ok");
+    } else {
+      st.textContent = (note ? note + " " : "") + "The background could not be removed automatically, so your photo was placed on white as it is. For the best result, retake it in front of a plain light wall.";
+      st.className = "pstat warn";
+    }
   });
 }
 
@@ -227,19 +277,22 @@ function collect() {
   if (!CIVIL.includes($("civil").value)) return { err: "Please choose your civil status." };
   if (!curCat()) return { err: "Please choose a category." };
   if (!$("center").value) return { err: "Please choose your center." };
+  const gift = v("gift");
+  if (!gift) return { err: "Please choose your spiritual gift (choose \"None\" if you prefer not to name one)." };
   if (v("address").length < 3) return { err: "Please enter your address." };
   const email = v("email"), tel = v("contact");
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { err: "Please enter a valid email address." };
   if (tel && !/^[0-9+()\-\s]{7,20}$/.test(tel)) return { err: "Please enter a valid contact number." };
+  if (photoBusy) return { err: "Please wait a moment: your photo is still being prepared." };
   const file = $("photo").files[0];
-  if (!file || !photoOk) return { err: "Profile photo is required. Please upload a clear 1x1 or passport-size photo." };
+  if (!file || !photoOk || !photoBlob) return { err: "Profile photo is required. Please upload a clear 1x1 or passport-size photo." };
   if (!$("idconfirm").checked) return { err: "Please confirm that your photo is a school-ID style photo." };
   return { file, row: {
     first_name: first, middle_name: mid, last_name: last + (suf ? " " + suf : ""),
     full_name: [first, mid, last, suf].filter(Boolean).join(" "),
     date_of_birth: $("dob").value, gender: $("gender").value, civil_status: $("civil").value,
     category: curCat(), age, center: $("center").value, position: "Member",
-    spiritual_gift: v("gift") || "None", contact_number: tel || null, email: email || null, address: v("address"),
+    spiritual_gift: gift, contact_number: tel || null, email: email || null, address: v("address"),
     is_officer: false } };
 }
 
@@ -259,8 +312,8 @@ function wireForm(extra, save) {
       // The database also refuses blocked people. If is_blocked() is missing (older database) this check is skipped.
       const bl = await db.rpc("is_blocked", { p_name: c.row.full_name, p_dob: c.row.date_of_birth });
       if (!bl.error && bl.data === true) throw new Error("BLOCKED");
-      say("Preparing photo…");
-      let blob; try { blob = await compress(c.file); } catch (_) { throw new Error("FRIENDLY:This photo could not be read. Please try another photo."); }
+      const blob = photoBlob; // white-background JPEG made when the photo was chosen
+      if (!blob) throw new Error("FRIENDLY:This photo could not be read. Please try another photo.");
       say("Uploading…");
       path = uid() + ".jpg";
       let up = await db.storage.from("member-photos").upload(path, blob, { contentType: "image/jpeg" });
@@ -270,7 +323,7 @@ function wireForm(extra, save) {
       say("Saving…");
       await save(c.row, x);
       const name = c.row.full_name;
-      $("f").reset(); touched = false; $("preview").style.display = "none"; $("pstat").textContent = ""; photoOk = false; refresh();
+      $("f").reset(); touched = false; $("preview").style.display = "none"; $("pstat").textContent = ""; photoOk = false; photoBlob = null; refresh();
       say("Thank you! " + name + " is registered. You can fill out the form again for another person.", "ok");
       $("msg").scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (err) {
