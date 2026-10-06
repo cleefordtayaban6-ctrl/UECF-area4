@@ -81,12 +81,23 @@ function opaqueShare(img) { // share of clearly visible pixels: a near-empty cut
   for (let i = 3; i < d.length; i += 4) if (d[i] > 128) n++;
   return n / (64 * 64);
 }
-async function whiteBg(file) { // -> { blob: JPEG on #FFFFFF, removed: true if the background was really cut out }
+async function whiteBg(file, box) { // -> { blob: JPEG on #FFFFFF, removed: true if the background was really cut out, fixed: sharpened, score0/score: sharpness }
   const img = await loadImage(file);
   const s = Math.min(1, 900 / Math.max(img.naturalWidth, img.naturalHeight));
   const w = Math.max(1, Math.round(img.naturalWidth * s)), h = Math.max(1, Math.round(img.naturalHeight * s));
   const base = document.createElement("canvas"); base.width = w; base.height = h;
-  base.getContext("2d").drawImage(img, 0, 0, w, h);
+  base.getContext("2d", { willReadFrequently: true }).drawImage(img, 0, 0, w, h);
+  // Blur gate, judged on the exact picture that will be stored: clear -> pass; slightly soft -> sharpen once and re-test;
+  // very soft, or still soft after sharpening -> reject. Runs before the (slow) background removal.
+  const score0 = sharpness(base, box); let score = score0, fixed = false;
+  if (score < SHARP_OK) {
+    const bad = () => { const e = new Error("BLURRY"); e.score = score; e.score0 = score0; return e; };
+    if (score < SHARP_MIN) throw bad();
+    const x0 = base.getContext("2d"), id = x0.getImageData(0, 0, w, h);
+    unsharpData(id.data, w, h, 1.0, 2); x0.putImageData(id, 0, 0);
+    fixed = true; score = sharpness(base, box);
+    if (score < SHARP_OK) throw bad();
+  }
   const cutOut = async () => {
     const mod = await loadBgLib();
     const fn = typeof mod.removeBackground === "function" ? mod.removeBackground : (mod.default && mod.default.removeBackground) || mod.default;
@@ -101,7 +112,112 @@ async function whiteBg(file) { // -> { blob: JPEG on #FFFFFF, removed: true if t
   const c = document.createElement("canvas"); c.width = w; c.height = h;
   const x = c.getContext("2d"); x.fillStyle = "#FFFFFF"; x.fillRect(0, 0, w, h);
   x.drawImage(cut || base, 0, 0, w, h);
-  return { blob: await toBlob(c, "image/jpeg", 0.85), removed: !!cut };
+  return { blob: await toBlob(c, "image/jpeg", 0.85), removed: !!cut, fixed, score0, score };
+}
+
+// ---- Face check (whole face inside the frame) + sharpness gate ----
+// Face: MediaPipe Face Landmarker, loaded lazily from the CDN (about 15 MB the first time, cached afterwards).
+// The photo is refused if no face is found, if two faces are found, or if any face landmark touches or leaves the edge.
+// If the detector cannot run (offline, old phone) the native FaceDetector is tried; if neither works the photo is
+// accepted with a notice, so a tooling problem never blocks a registration.
+const MP_LIB = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+const MP_WASM = MP_LIB + "/wasm";
+const MP_MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const FACE_TIMEOUT = 30000; // ms
+// Sharpness = variance of the Laplacian on a 160x160 crop of the face (higher = sharper). These are STARTING values:
+// add ?debug to the page address to see each photo's score on screen, then adjust with a few sharp and blurry photos.
+const SHARP_OK = 60;   // at or above: sharp enough
+const SHARP_MIN = 30;  // below: too blurry to repair, rejected; between MIN and OK: sharpened once, then re-tested
+const DEBUG = /[?&]debug(=|&|$)/.test(location.search);
+let faceLm = null;
+function loadFaceLm() {
+  if (!faceLm) faceLm = (async () => {
+    const mod = await import(MP_LIB);
+    const ns = mod.FaceLandmarker ? mod : (mod.default || mod);
+    const fileset = await ns.FilesetResolver.forVisionTasks(MP_WASM);
+    return ns.FaceLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath: MP_MODEL, delegate: "CPU" }, runningMode: "IMAGE", numFaces: 3 }); // CPU: slower than GPU but works on every phone
+  })().catch(e => { faceLm = null; throw e; });
+  return faceLm;
+}
+const FACE_MSG = {
+  none: "We could not find a full face in this photo. Face the camera in good light, with your whole face and some space around your head in the picture.",
+  multi: "More than one face was detected. An ID photo must show only you.",
+  cut: "Part of your face is cut off or touches the edge of the photo. Your whole face must be visible, with a little space around your head.",
+  small: "Your face is too small in the photo. Move closer or crop to head and shoulders.",
+  turned: "Please face the camera straight on so your whole face is visible."
+};
+// -> { err } to reject, or { box: {x0,y0,x1,y1} (0..1) | null, note }
+async function checkFace(img) {
+  const s = Math.min(1, 800 / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(img.naturalWidth * s)); c.height = Math.max(1, Math.round(img.naturalHeight * s));
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  let faces = null;
+  try { faces = (await withTimeout(loadFaceLm(), FACE_TIMEOUT)).detect(c).faceLandmarks || []; }
+  catch (e) { console.warn("Face Landmarker unavailable:", e); }
+  if (faces) {
+    if (!faces.length) return { err: FACE_MSG.none };
+    if (faces.length > 1) return { err: FACE_MSG.multi };
+    const p = faces[0]; let x0 = 9, y0 = 9, x1 = -9, y1 = -9;
+    for (const q of p) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.y < y0) y0 = q.y; if (q.y > y1) y1 = q.y; }
+    const m = 0.01; // landmarks of a cropped face land on or beyond the image edge
+    if (x0 < m || y0 < m || x1 > 1 - m || y1 > 1 - m) return { err: FACE_MSG.cut };
+    if (y1 - y0 < 0.18) return { err: FACE_MSG.small };
+    const eyeW = p[263].x - p[33].x; // outer eye corners and nose tip: a strongly turned head puts the nose far from the middle
+    if (eyeW > 0.02) { const r = (p[1].x - p[33].x) / eyeW; if (r < 0.25 || r > 0.75) return { err: FACE_MSG.turned }; }
+    return { box: { x0, y0, x1, y1 } };
+  }
+  if (window.FaceDetector) { // fallback: the browser's own detector (Chrome on Android)
+    try {
+      const f = await new FaceDetector({ fastMode: true, maxDetectedFaces: 5 }).detect(img);
+      const W = img.naturalWidth, H = img.naturalHeight;
+      if (f.length > 1) return { err: FACE_MSG.multi };
+      if (f.length === 1) {
+        const b = f[0].boundingBox;
+        if (b.x < W * 0.01 || b.y < H * 0.01 || b.x + b.width > W * 0.99 || b.y + b.height > H * 0.99) return { err: FACE_MSG.cut };
+        if (b.height / H < 0.2) return { err: FACE_MSG.small };
+        return { box: { x0: b.x / W, y0: b.y / H, x1: (b.x + b.width) / W, y1: (b.y + b.height) / H } };
+      }
+    } catch (_) { /* fall through */ }
+  }
+  return { box: null, note: "Photo accepted, but we could not check your face automatically. Make sure your whole face is visible and sharp." };
+}
+function lapVar(g, N) { // variance of the 4-neighbour Laplacian over an N x N grey image
+  let sum = 0, sq = 0, n = 0;
+  for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) {
+    const i = y * N + x, v = g[i - 1] + g[i + 1] + g[i - N] + g[i + N] - 4 * g[i];
+    sum += v; sq += v * v; n++;
+  }
+  return n ? sq / n - (sum / n) * (sum / n) : 0;
+}
+function sharpness(canvas, box) { // score of the middle 80% of the face box (or the upper middle of the photo when no face box)
+  const b = box || { x0: 0.25, y0: 0.12, x1: 0.75, y1: 0.62 }, W = canvas.width, H = canvas.height, N = 160;
+  const cx = (b.x0 + b.x1) / 2 * W, cy = (b.y0 + b.y1) / 2 * H, hw = Math.max(8, (b.x1 - b.x0) * W * 0.4), hh = Math.max(8, (b.y1 - b.y0) * H * 0.4);
+  const sx = Math.max(0, cx - hw), sy = Math.max(0, cy - hh), sw = Math.max(1, Math.min(W - sx, hw * 2)), sh = Math.max(1, Math.min(H - sy, hh * 2));
+  const t = document.createElement("canvas"); t.width = t.height = N;
+  const x = t.getContext("2d", { willReadFrequently: true }); x.drawImage(canvas, sx, sy, sw, sh, 0, 0, N, N);
+  const d = x.getImageData(0, 0, N, N).data, g = new Float32Array(N * N);
+  for (let i = 0, p = 0; i < g.length; i++, p += 4) g[i] = .299 * d[p] + .587 * d[p + 1] + .114 * d[p + 2];
+  return Math.round(lapVar(g, N) * 10) / 10;
+}
+function unsharpData(d, w, h, amount, r) { // sharpen RGBA data in place: out = orig + amount * (orig - boxBlur(orig))
+  const k = 2 * r + 1, tmp = new Float32Array(w * h * 3), bl = new Float32Array(w * h * 3);
+  for (let y = 0; y < h; y++) for (let ch = 0; ch < 3; ch++) {
+    const row = y * w; let sum = 0;
+    for (let x = -r; x <= r; x++) sum += d[(row + Math.min(w - 1, Math.max(0, x))) * 4 + ch];
+    for (let x = 0; x < w; x++) {
+      tmp[(row + x) * 3 + ch] = sum / k;
+      sum += d[(row + Math.min(w - 1, x + r + 1)) * 4 + ch] - d[(row + Math.max(0, x - r)) * 4 + ch];
+    }
+  }
+  for (let x = 0; x < w; x++) for (let ch = 0; ch < 3; ch++) {
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += tmp[(Math.min(h - 1, Math.max(0, y)) * w + x) * 3 + ch];
+    for (let y = 0; y < h; y++) {
+      bl[(y * w + x) * 3 + ch] = sum / k;
+      sum += tmp[(Math.min(h - 1, y + r + 1) * w + x) * 3 + ch] - tmp[(Math.max(0, y - r) * w + x) * 3 + ch];
+    }
+  }
+  for (let i = 0; i < w * h; i++) for (let ch = 0; ch < 3; ch++) { const o = d[i * 4 + ch]; d[i * 4 + ch] = o + amount * (o - bl[i * 3 + ch]); } // Uint8ClampedArray clamps 0..255
 }
 
 /*A*/
@@ -235,31 +351,34 @@ function renderCommon(officer) {
     else if (ratio > 1.15) msg = "This is a wide (landscape) photo. An ID photo is portrait or square, showing head and shoulders only.";
     else if (ratio < 0.6) msg = "This photo is too narrow. Use a normal portrait or square ID-style photo.";
     if (!msg) { const lp = lookCheck(img); if (lp && lp.block) msg = lp.block; else if (lp) note = "Photo accepted, but please check: " + lp.warn; }
-    if (!msg && window.FaceDetector) {
-      try {
-        const faces = await new FaceDetector({ fastMode: true, maxDetectedFaces: 5 }).detect(img);
-        if (faces.length > 1) msg = "More than one face was detected. An ID photo must show only you.";
-        else if (faces.length === 1 && faces[0].boundingBox.height / h < 0.2) msg = "Your face is too small in the photo. Move closer or crop to head and shoulders.";
-        else if (!faces.length && !note) note = "We could not clearly detect a face. Make sure your whole face is visible and well lit.";
-      } catch (_) { /* detector unavailable: skip this check */ }
+    let box = null; // where the face is, so the blur test looks at the face and not at the wall
+    if (!msg) {
+      photoBusy = true; st.textContent = "Checking your face\u2026 (the first photo can take a little longer)"; st.className = "pstat";
+      const fc = await checkFace(img);
+      if (seq === photoSeq) photoBusy = false;
+      if (fc.err) msg = fc.err; else { box = fc.box || null; if (fc.note && !note) note = fc.note; }
     }
     URL.revokeObjectURL(url); // the checks above ran on the original; the preview below shows the white-background version
     if (msg) return fail(msg);
     if (seq !== photoSeq) return;
-    photoBusy = true; st.textContent = "Removing background\u2026 (the first photo can take a little longer)"; st.className = "pstat";
+    photoBusy = true; st.textContent = "Checking sharpness and removing background\u2026"; st.className = "pstat";
     let res;
-    try { res = await whiteBg(f); }
-    catch (_) { if (seq === photoSeq) photoBusy = false; return fail("This photo could not be read. Please choose another one."); }
+    try { res = await whiteBg(f, box); }
+    catch (e) {
+      if (seq === photoSeq) photoBusy = false;
+      if (e && e.message === "BLURRY") return fail("This photo is too blurry. Hold the phone steady, use good light, wipe the camera lens, and take it again." + (DEBUG ? " [sharpness " + e.score0 + (e.score !== e.score0 ? " \u2192 " + e.score : "") + ", needs " + SHARP_OK + "]" : ""));
+      return fail("This photo could not be read. Please choose another one.");
+    }
     if (seq !== photoSeq) return; // a newer photo was chosen meanwhile
     photoBusy = false; photoBlob = res.blob;
     prevUrl = URL.createObjectURL(res.blob); p.src = prevUrl; p.style.display = "block"; photoOk = true;
-    if (res.removed) {
-      st.textContent = note || "\u2713 Photo accepted with a white background. Please check that it matches the requirements above.";
-      st.className = "pstat " + (note ? "warn" : "ok");
-    } else {
-      st.textContent = (note ? note + " " : "") + "The background could not be removed automatically, so your photo was placed on white as it is. For the best result, retake it in front of a plain light wall.";
-      st.className = "pstat warn";
-    }
+    const parts = [];
+    if (note) parts.push(note);
+    if (res.fixed) parts.push("The photo was slightly blurry, so it was sharpened automatically. A sharper photo is still better.");
+    if (!res.removed) parts.push("The background could not be removed automatically, so your photo was placed on white as it is. For the best result, retake it in front of a plain light wall.");
+    const dbg = DEBUG ? " [sharpness " + res.score0 + (res.fixed ? " \u2192 " + res.score : "") + "]" : "";
+    if (parts.length) { st.textContent = parts.join(" ") + dbg; st.className = "pstat warn"; }
+    else { st.textContent = "\u2713 Photo accepted with a white background. Please check that it matches the requirements above." + dbg; st.className = "pstat ok"; }
   });
 }
 
