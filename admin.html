@@ -53,6 +53,7 @@ dialog{max-height:92vh;overflow-y:auto}
  td img{width:96px;height:120px}
  td.act{gap:8px}td.act button{flex:1;min-height:44px}
 }
+.pager{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;margin:14px 0}
 .badge{background:var(--accent);color:#fff;border-radius:99px;padding:1px 8px;font-size:.75rem;margin-left:6px}
 @media (prefers-color-scheme:dark){.badge{color:#0b1410}}
 .pill{border:1px solid var(--line);border-radius:99px;padding:1px 8px;margin-left:6px;color:var(--mute)}
@@ -97,7 +98,7 @@ button[data-act=edit]:disabled{cursor:not-allowed}
     <button id="xls" type="button">Download Excel</button>
     <button id="zip" type="button">Download Photos (ZIP)</button>
     <button id="blist" type="button" class="plain">Blocked list</button>
-    <button id="selbtn" type="button" class="plain">Select all shown</button>
+    <button id="selbtn" type="button" class="plain">Select all matching</button>
     <button id="donebtn" type="button" hidden>Done (0)</button>
     <button id="undobtn" type="button" class="plain" hidden>Undo done (0)</button>
     <button id="delsel" type="button" class="del" hidden>Delete selected (0)</button>
@@ -111,6 +112,7 @@ button[data-act=edit]:disabled{cursor:not-allowed}
       <tbody id="rows"></tbody>
     </table>
   </div>
+  <div id="pager" class="pager" hidden></div>
 </section>
 </main>
 
@@ -338,14 +340,32 @@ function filtered(){
     && (!t || (t === "o") === !!m.is_officer) && (!g || m.category === g) && (!p || (m.offs || []).some(o => p === "__other" ? !POS.includes(o.position) : o.position === p)));
 }
 
+let page = 1, lastSig = null;
+const PAGE_SIZE = 50; // rows per page: keeps the table short and fast with 1,000+ members
+function renderPager(total, pages){
+  const p = $("pager"); p.hidden = total <= PAGE_SIZE;
+  p.innerHTML = `<button type="button" class="plain sm" id="pprev" ${page <= 1 ? "disabled" : ""}>&laquo; Previous</button>
+    <span>Page ${page} of ${pages}</span>
+    <button type="button" class="plain sm" id="pnext" ${page >= pages ? "disabled" : ""}>Next &raquo;</button>`;
+  const go = d => { page += d; render(); $("tw").scrollIntoView({ block: "start" }); };
+  $("pprev").onclick = () => go(-1);
+  $("pnext").onclick = () => go(1);
+}
 function render(){
   const oc = $("fv").value === "c", list = oc ? filtered().filter(m => m.off) : filtered();
   $("count").textContent = list.length + (oc ? " officer" : " member") + (list.length === 1 ? "" : "s") + (!oc && list.length !== all.length ? " (of " + all.length + " total)" : "");
   { const nn = all.filter(isNew).length; $("newn").hidden = !nn; $("newn").textContent = nn + " new"; }
-  { const n = filtered().length; $("delall").textContent = n === all.length ? "Delete all" : "Delete shown (" + n + ")"; } updSel();
+  { const n = filtered().length; $("delall").textContent = n === all.length ? "Delete all" : "Delete matching (" + n + ")"; } updSel();
   $("tw").hidden = oc; $("oc").hidden = !oc;
-  if (oc) return renderOfficers(list);
-  $("rows").innerHTML = list.length ? list.map(m => `<tr>
+  if (oc) { $("pager").hidden = true; return renderOfficers(list); }
+  // a new search or filter starts again at page 1
+  const sig = [$("fc").value, $("q").value, $("ft").value, $("fcat").value, $("fpos").value, $("fv").value].join("|");
+  if (sig !== lastSig) { page = 1; lastSig = sig; }
+  const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  page = Math.min(Math.max(1, page), pages);
+  const pageRows = list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  renderPager(list.length, pages);
+  $("rows").innerHTML = pageRows.length ? pageRows.map(m => `<tr>
     <td class="sel" data-label="Select"><input type="checkbox" data-sel="${m.id}" ${sel.has(m.id) ? "checked" : ""} aria-label="Select ${esc(m.full_name)}"></td>
     <td class="ph">${urls[m.photo_path] ? `<a href="${urls[m.photo_path]}" target="_blank" rel="noopener"><img loading="lazy" src="${urls[m.photo_path]}" alt="Photo of ${esc(m.full_name)}"></a>` : '<span class="nophoto">No photo</span>'}</td>
     <td data-label="Name">${esc(m.full_name)}${isNew(m) ? '<span class="badge" style="background:var(--err);color:#fff">New</span>' : ""}${m.is_officer ? '<span class="badge">Officer</span>' : ""}${m.is_done ? '<span class="badge dn">Done</span>' : ""}</td>
@@ -596,7 +616,7 @@ const selected = () => filtered().filter(m => sel.has(m.id));
 function updSel(){
   const oc = $("fv").value === "c", n = selected().length, shown = filtered().length;
   $("delsel").hidden = oc || !n; $("delsel").textContent = "Delete selected (" + n + ")";
-  $("selbtn").hidden = oc; $("selbtn").textContent = n && n === shown ? "Clear selection" : "Select all shown";
+  $("selbtn").hidden = oc; $("selbtn").textContent = n && n === shown ? "Clear selection" : "Select all matching";
   const nd = selected().filter(m => m.is_done).length, nt = n - nd;   // ticked rows already Done / not yet Done
   $("donebtn").hidden = oc || !nt; $("donebtn").textContent = "Done (" + nt + ")";
   $("undobtn").hidden = oc || !nd; $("undobtn").textContent = "Undo done (" + nd + ")";
