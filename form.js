@@ -252,9 +252,10 @@ function lookProblem(a) {
   if (a.text > 0.35) return { block: M.text };
   if (a.busy > 0.20) return { block: M.busy };
   if (a.bright < 45) return { warn: M.dark };
-  if (a.skinEdge > 0.30) return { warn: M.skin };
-  if (a.text > 0.22) return { warn: M.text };
-  if (a.busy > 0.12) return { warn: M.busy };
+  // Borderline skin, text or busy-background cases are refused too: an ID-style photo has none of them
+  if (a.skinEdge > 0.30) return { block: M.skin };
+  if (a.text > 0.22) return { block: M.text };
+  if (a.busy > 0.12) return { block: M.busy };
   return null;
 }
 /*B*/
