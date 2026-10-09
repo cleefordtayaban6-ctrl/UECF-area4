@@ -370,12 +370,14 @@ function renderCommon(officer) {
       return fail("This photo could not be read. Please choose another one.");
     }
     if (seq !== photoSeq) return; // a newer photo was chosen meanwhile
-    photoBusy = false; photoBlob = res.blob;
+    photoBusy = false;
+    // ID-style rule: if the person cannot be separated from the background, the photo is not an ID-style photo. Refuse it.
+    if (!res.removed) return fail("This is not an ID-style photo: the background could not be separated from you. Use a plain, light wall, stand facing the camera with only you in the frame, and take it again.");
+    photoBlob = res.blob;
     prevUrl = URL.createObjectURL(res.blob); p.src = prevUrl; p.style.display = "block"; photoOk = true;
     const parts = [];
     if (note) parts.push(note);
     if (res.fixed) parts.push("The photo was slightly blurry, so it was sharpened automatically. A sharper photo is still better.");
-    if (!res.removed) parts.push("The background could not be removed automatically, so your photo was placed on white as it is. For the best result, retake it in front of a plain light wall.");
     const dbg = DEBUG ? " [sharpness " + res.score0 + (res.fixed ? " \u2192 " + res.score : "") + "]" : "";
     if (parts.length) { st.textContent = parts.join(" ") + dbg; st.className = "pstat warn"; }
     else { st.textContent = "\u2713 Photo accepted with a white background. Please check that it matches the requirements above." + dbg; st.className = "pstat ok"; }
