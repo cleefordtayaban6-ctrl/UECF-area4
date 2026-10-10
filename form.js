@@ -252,10 +252,9 @@ function lookProblem(a) {
   if (a.text > 0.35) return { block: M.text };
   if (a.busy > 0.20) return { block: M.busy };
   if (a.bright < 45) return { warn: M.dark };
-  // Borderline skin, text or busy-background cases are refused too: an ID-style photo has none of them
-  if (a.skinEdge > 0.30) return { block: M.skin };
-  if (a.text > 0.22) return { block: M.text };
-  if (a.busy > 0.12) return { block: M.busy };
+  if (a.skinEdge > 0.30) return { warn: M.skin };
+  if (a.text > 0.22) return { warn: M.text };
+  if (a.busy > 0.12) return { warn: M.busy };
   return null;
 }
 /*B*/
@@ -315,7 +314,10 @@ function renderCommon(officer) {
       <figure><svg viewBox="0 0 90 110" width="90" height="110" role="img" aria-label="Not accepted: casual, wide or full-body photo with a busy background"><rect width="90" height="110" rx="6" style="fill:var(--bg);stroke:var(--line)"/><path d="M0 72l20-25 15 15 18-30 37 40v38H0z" style="fill:var(--line)"/><circle cx="62" cy="62" r="7" style="fill:var(--mute)"/><path d="M50 110c1-14 6-22 12-22s11 8 12 22z" style="fill:var(--mute)"/><path d="M10 10L80 100" style="stroke:var(--err);stroke-width:4"/></svg><figcaption class="bad">&#10007; Not accepted</figcaption></figure>
     </div>
     <ul class="req"><li>Plain, light background</li><li>Head and shoulders, facing the camera</li><li>Whole face clear, well lit, no filters</li><li>Only you in the photo; no hat or sunglasses</li><li>A photo of yourself, not of an ID card or printed picture; no hands or table in view</li></ul>
-    <input id="photo" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose ID-style photo">
+    <input id="photo" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose ID-style photo" style="display:none">
+    <input id="ph_cam_in" type="file" accept="image/*" capture="user" aria-label="Take ID-style photo with camera" style="display:none">
+    <button type="button" id="ph_cam" class="plain" style="margin-top:12px">Take a photo with camera</button>
+    <button type="button" id="ph_dev" class="plain" style="margin-top:8px">Choose a photo from device</button>
     <div id="pstat" class="pstat" role="status" aria-live="polite"></div>
     <img id="preview" alt="Photo preview">
     <label class="r"><input type="checkbox" id="idconfirm"> I confirm this is a recent school-ID style photo of myself.</label>
@@ -329,10 +331,20 @@ function renderCommon(officer) {
   $("dob").oninput = $("dob").onchange = refresh;
   $("civil").onchange = () => { touched = false; refresh(); }; // civil status change re-suggests Katandaan
   document.querySelectorAll("input[name=cat]").forEach(r => r.onchange = () => { touched = true; refresh(); });
-  let tipOk = false; // reminder shown every time
-  $("photo").addEventListener("click", e => { if (typeof $("tip").showModal !== "function") return; /* very old phones: skip the reminder, never block the picker */ if (tipOk) { tipOk = false; return; } e.preventDefault(); $("tip").showModal(); });
-  $("tipok").onclick = () => { $("tip").close(); tipOk = true; $("photo").click(); };
+  // Reminder shown every time, before either the camera or the device picker opens.
+  let pendingInput = null;
+  const askThenOpen = inp => { if (typeof $("tip").showModal !== "function") return inp.click(); /* very old phones: skip the reminder, never block */ pendingInput = inp; $("tip").showModal(); };
+  $("ph_cam").onclick = () => askThenOpen($("ph_cam_in"));
+  $("ph_dev").onclick = () => askThenOpen($("photo"));
+  $("tipok").onclick = () => { $("tip").close(); if (pendingInput) pendingInput.click(); };
   $("tipno").onclick = () => $("tip").close();
+  // A photo taken with the camera is handed to the same checks as a device photo.
+  $("ph_cam_in").addEventListener("change", () => {
+    const f = $("ph_cam_in").files[0]; if (!f) return;
+    const dt = new DataTransfer(); dt.items.add(f);
+    $("photo").files = dt.files; $("ph_cam_in").value = "";
+    $("photo").dispatchEvent(new Event("change"));
+  });
   let photoSeq = 0, prevUrl = null; // preview object URL, revoked when replaced
   // Automatic checks: format, size, portrait/square shape, and (where the browser supports it) face count and size.
   // These catch obvious non-ID photos; the admin can still review every photo.
@@ -371,14 +383,12 @@ function renderCommon(officer) {
       return fail("This photo could not be read. Please choose another one.");
     }
     if (seq !== photoSeq) return; // a newer photo was chosen meanwhile
-    photoBusy = false;
-    // ID-style rule: if the person cannot be separated from the background, the photo is not an ID-style photo. Refuse it.
-    if (!res.removed) return fail("This is not an ID-style photo: the background could not be separated from you. Use a plain, light wall, stand facing the camera with only you in the frame, and take it again.");
-    photoBlob = res.blob;
+    photoBusy = false; photoBlob = res.blob;
     prevUrl = URL.createObjectURL(res.blob); p.src = prevUrl; p.style.display = "block"; photoOk = true;
     const parts = [];
     if (note) parts.push(note);
     if (res.fixed) parts.push("The photo was slightly blurry, so it was sharpened automatically. A sharper photo is still better.");
+    if (!res.removed) parts.push("The background could not be removed automatically, so your photo was placed on white as it is. For the best result, retake it in front of a plain light wall.");
     const dbg = DEBUG ? " [sharpness " + res.score0 + (res.fixed ? " \u2192 " + res.score : "") + "]" : "";
     if (parts.length) { st.textContent = parts.join(" ") + dbg; st.className = "pstat warn"; }
     else { st.textContent = "\u2713 Photo accepted with a white background. Please check that it matches the requirements above." + dbg; st.className = "pstat ok"; }
